@@ -1,3 +1,4 @@
+#include <memory>
 #include <mim/driver.h>
 
 #include <mim/ast/parser.h>
@@ -39,18 +40,18 @@ public:
 
     Vars free_vars(Def* expr) {
         auto& st = get_state(expr);
-        auto w = &expr->world();
+        auto& w = expr->world();
 
         if (st.mark_ == 0) { /* use fixed-point iteration to recompute free vars */
             bool cyclic = false;
             /* first we need to do the initial run */
-            w->next_run();
-            free_vars<true>(cyclic, w->next_run(), expr);
+            w.next_run();
+            free_vars<true>(cyclic, w.next_run(), expr);
 
             /* now we can iterate to solve for the fixed-point */
             for (bool todo = cyclic; todo;) {
                 todo = false;
-                free_vars<false>(todo, w->next_run(), expr);
+                free_vars<false>(todo, w.next_run(), expr);
             }
         }
 
@@ -90,11 +91,11 @@ public:
             if constexpr (init) fvs = vars.merge(fvs, local_vars(op));
 
             /* then add the free vars of every from op reachable mutable */
-            for (auto mut : op->local_muts()) {
-                /* in the first run we make sure that exp is added to the local_muts of the dependency */
+            for (auto mut : local_muts(op)) {
                 if constexpr (init) {
-                    auto& st = get_state(mut);
-                    st.muts_ = muts.insert(st.muts_, expr);
+                    /* add expr to list of users from mut */
+                    auto& st_mut = get_state(mut);
+                    st_mut.muts_ = muts.insert(st_mut.muts_, expr);
                 }
 
                 /* now we add the free vars of the dependencies */
@@ -112,6 +113,10 @@ public:
     }
 
     void print_state(const Def* expr) {
+        if (!state_.contains(expr)) {
+            std::cout << expr << " not in state\n";
+            return;
+        }
         auto& st = get_state(expr);
         std::cout << "vars : " << st.vars_ << "\n"
                   << "muts : " << st.muts_
@@ -125,36 +130,43 @@ private:
         Muts muts_ = Muts(); // Immutable: local_muts; Mutable: users;
     };
 
+    DefMap<std::unique_ptr<FVState>> state_;
+
     FVState& get_state(const Def* expr) {
+        bool exists = state_.contains(expr);
+
+        /* TODO for debuging I'm currently using the exit label with goto. remove that paradime if no longer needed */
+
+        if(!exists) state_.emplace(expr, std::make_unique<FVState>());
+        auto& st = *state_.at(expr); /* make sure that the entry exists */
+
         // state already exists
-        if (state_.contains(expr)) return state_[expr];
+        if (exists) goto exit;
 
-        // create empty state
-        auto& st = state_[expr];
+        /* now we have to calculate the local vars : the set of vars reachable by following immutable deps */
+        /* and we have to calculate the local muts : the set of muts reachable by following immutable deps */
 
-        /* if expr is a var then local_vars is just {var}
-         * NOTE: that Var means that expr is mutable. thus muts_ is just {expr}
-         * which is already returned by local_muts() because it is mutable
-         * */
+        /* according to some comments this is per definition right */
         if (auto var = expr->isa<Var>()) {
             st.vars_ = Vars(var);
-            return st;
+        } else {
+            auto& world = expr->world();
+            auto& vars = world.vars();
+            auto& muts = world.muts();
+
+            /* NOTE: QUESTION: I'm not using deps() because that only includes ops if they are set. (is this limitation ok?) */
+            if (auto type = expr->type()) {
+                st.vars_ = vars.merge(st.vars_, local_vars(type));
+                st.muts_ = muts.merge(st.muts_, local_muts(type));
+            }
+
+            for (auto op : expr->ops()) {
+                st.vars_ = vars.merge(st.vars_, local_vars(op));
+                st.muts_ = muts.merge(st.muts_, local_muts(op));
+            }
         }
 
-        auto& world = expr->world();
-        auto& vars = world.vars();
-        auto& muts = world.muts();
-
-        if (auto type = expr->type()) {
-            st.vars_ = vars.merge(st.vars_, local_vars(type));
-            st.muts_ = muts.merge(st.muts_, local_muts(type));
-        }
-
-        for (auto op : expr->ops()) {
-            st.vars_ = vars.merge(st.vars_, local_vars(op));
-            st.muts_ = muts.merge(st.muts_, local_muts(op));
-        }
-
+exit:
         return st;
     }
 
@@ -169,8 +181,6 @@ private:
         if (auto mut = expr->isa_mut()) return Muts(mut);
         return get_state(expr).muts_;
     }
-
-    DefMap<FVState> state_;
 };
 
 
