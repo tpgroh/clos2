@@ -6,6 +6,7 @@
 #include <mim/util/sys.h>
 
 #include <mim/plug/mem/mem.h>
+#include "mim/def.h"
 
 #include "mim/plug/core/autogen.h"
 
@@ -187,6 +188,16 @@ exit:
 
 
 
+void foo(const Def* expr, DefSet &done, FVAnalysis &ana) {
+    if (!done.emplace(expr).second) return;
+
+    std::cout << "\ncomparing free var anas for " << expr << std::endl;
+    std::cout << "old free vars :" << expr->free_vars() << std::endl;
+    std::cout << "new free vars : " << ana.free_vars(expr) << std::endl;
+
+    for (auto def : expr->deps())
+        foo(def, done, ana);
+}
 
 int main(int, char**) {
     auto driver = Driver("test01");
@@ -217,18 +228,10 @@ int main(int, char**) {
     loop->app(false, selected, Defs{});
     count->app(false, loop, Defs{zero, zero});
 
-    FVAnalysis fvana{};
-    auto e = body;
+    FVAnalysis ana{};
+    DefSet done_{};
 
-    std::cout << "\n\ncomparing free var anas for " << e << "\n\n";
-
-    std::cout << "libmim's free var ana" << std::endl;
-    std::cout << "free vars :" << e->free_vars() << std::endl;
-    std::cout << "muts : " << e->users() << std::endl;
-
-    std::cout << "\n\nmy free var ana" << std::endl;
-    std::cout << "free vars : " << fvana.free_vars(e) << std::endl;
-    fvana.print_state(e);
+    foo(body, done_, ana);
 
     count->dot("test.dot");
 
