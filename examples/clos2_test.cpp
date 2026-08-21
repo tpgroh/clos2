@@ -22,7 +22,7 @@ using namespace mim::plug;
  */
 class FVAnalysis {
 public:
-    Vars free_vars(const Def* expr) {
+    DefSet free_vars(const Def* expr) {
         /* if expr is a mutable switch to the other free_vars */
         if (auto mut = expr->isa_mut()) return free_vars(mut);
 
@@ -31,15 +31,15 @@ public:
          * this means that the free vars are the union of all vars reachable.
          * thus the union of the localvars of all reachable mutables.
          */
-        auto& vars = expr->world().vars();
         auto fvs   = local_vars(expr);
         for (auto mut : local_muts(expr))
-            fvs = vars.merge(fvs, free_vars(mut));
+            for (auto v : free_vars(mut))
+                fvs.emplace(v);
 
         return fvs;
     }
 
-    Vars free_vars(Def* expr) {
+    DefSet free_vars(Def* expr) {
         auto& st = get_state(expr);
         auto& w = expr->world();
 
@@ -61,7 +61,7 @@ public:
     }
 
     template<bool init>
-    Vars free_vars(bool& todo, uint32_t run, Def* expr) {
+    DefSet free_vars(bool& todo, uint32_t run, Def* expr) {
         /* NOTE: the following comment was copied from the <>Def::free_vars function */
         // If init == true : todo flag detects cycle.
         // If init == false: todo flag keeps track whether sth changed.
@@ -84,12 +84,13 @@ public:
         auto fvs0  = st.vars_; // create copy to check against later, see if the set changed
         auto fvs   = fvs0;
         auto& w    = expr->world();
-        auto& vars = w.vars();
         auto& muts = w.muts();
 
         for (auto op : expr->deps()) {
             /* we start by adding all from dependencies reachable vars */
-            if constexpr (init) fvs = vars.merge(fvs, local_vars(op));
+            if constexpr (init)
+                for (auto v : local_vars(op))
+                    fvs.emplace(v);
 
             /* then add the free vars of every from op reachable mutable */
             for (auto mut : local_muts(op)) {
@@ -100,11 +101,12 @@ public:
                 }
 
                 /* now we add the free vars of the dependencies */
-                fvs = vars.merge(fvs, free_vars<init>(todo, run, mut));
+                for (auto v : free_vars<init>(todo, run, mut))
+                    fvs.emplace(v);
             }
         }
 
-        if (auto var = expr->has_var()) fvs = vars.erase(fvs, var); // FV(lam x.e) = FV(e) \ {x}
+        // TODO if (auto var = expr->has_var()) fvs = vars.erase(fvs, var); // FV(lam x.e) = FV(e) \ {x}
 
         /* did smt change? */
         if constexpr (!init) todo |= fvs0 != fvs;
@@ -119,7 +121,10 @@ public:
             return;
         }
         auto& st = get_state(expr);
-        std::cout << "vars : " << st.vars_ << "\n"
+        std::cout << "vars : {";
+        for (auto v : st.vars_)
+            std::cout << v << ", ";
+        std::cout << "}\n"
                   << "muts : " << st.muts_
                   << std::endl;
     }
@@ -127,8 +132,8 @@ public:
 private:
     struct FVState {
         u32 mark_  = 0;
-        Vars vars_ = Vars(); // Mutable: local vars; Immutable: free vars.
-        Muts muts_ = Muts(); // Immutable: local_muts; Mutable: users;
+        DefSet vars_ = {}; // Mutable: local vars; Immutable: free vars.
+        Muts muts_ = {}; // Immutable: local_muts; Mutable: users;
     };
 
     DefMap<std::unique_ptr<FVState>> state_;
@@ -137,6 +142,8 @@ private:
         bool exists = state_.contains(expr);
 
         /* TODO for debuging I'm currently using the exit label with goto. remove that paradime if no longer needed */
+        auto& world = expr->world();
+        auto& muts = world.muts();
 
         if(!exists) state_.emplace(expr, std::make_unique<FVState>());
         auto& st = *state_.at(expr); /* make sure that the entry exists */
@@ -148,21 +155,22 @@ private:
         /* and we have to calculate the local muts : the set of muts reachable by following immutable deps */
 
         /* according to some comments this is per definition right */
-        if (auto var = expr->isa<Var>()) {
-            st.vars_ = Vars(var);
-        } else {
-            auto& world = expr->world();
-            auto& vars = world.vars();
-            auto& muts = world.muts();
-
+        if (auto var = expr->isa<Var>())
+            /* unpack vars if possible */
+            for (auto v : var->tprojs()) {
+                st.vars_.emplace(v);
+            }
+        else {
             /* NOTE: QUESTION: I'm not using deps() because that only includes ops if they are set. (is this limitation ok?) */
             if (auto type = expr->type()) {
-                st.vars_ = vars.merge(st.vars_, local_vars(type));
+                for (auto def : local_vars(type))
+                    st.vars_.emplace(def);
                 st.muts_ = muts.merge(st.muts_, local_muts(type));
             }
 
             for (auto op : expr->ops()) {
-                st.vars_ = vars.merge(st.vars_, local_vars(op));
+                for (auto def : local_vars(op))
+                    st.vars_.emplace(def);
                 st.muts_ = muts.merge(st.muts_, local_muts(op));
             }
         }
@@ -172,9 +180,9 @@ exit:
     }
 
     /// Var%s reachable by following *immutable* deps().
-    /// @note `var->local_vars()` is by definition the set `{ var }`.
-    Vars local_vars(const Def* expr) {
-        return expr->is_mutable() ? Vars() : get_state(expr).vars_;
+    /// @note `var->local_vars()` is by definition the set `{ var }`. TODO this comment was copied from libmim
+    DefSet local_vars(const Def* expr) {
+        return expr->is_mutable() ? DefSet() : get_state(expr).vars_;
     }
 
     /// Mutables reachable by following *immutable* deps(); `mut->local_muts()` is by definition the set `{ mut }`.
@@ -193,7 +201,10 @@ void foo(const Def* expr, DefSet &done, FVAnalysis &ana) {
 
     std::cout << "\ncomparing free var anas for " << expr << std::endl;
     std::cout << "old free vars :" << expr->free_vars() << std::endl;
-    std::cout << "new free vars : " << ana.free_vars(expr) << std::endl;
+    std::cout << "new free vars : {";
+    for (auto v : ana.free_vars(expr))
+        std::cout << v << ", ";
+    std::cout << std::endl;
 
     for (auto def : expr->deps())
         foo(def, done, ana);
