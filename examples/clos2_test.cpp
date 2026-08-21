@@ -106,7 +106,11 @@ public:
             }
         }
 
-        // TODO if (auto var = expr->has_var()) fvs = vars.erase(fvs, var); // FV(lam x.e) = FV(e) \ {x}
+        // FV(lam (x_1,...).e) = FV(e) \ {x_1,...}
+        if (auto var = expr->has_var()) {
+            for (auto v : var->tprojs())
+                fvs.erase(v);
+        }
 
         /* did smt change? */
         if constexpr (!init) todo |= fvs0 != fvs;
@@ -139,43 +143,32 @@ private:
     DefMap<std::unique_ptr<FVState>> state_;
 
     FVState& get_state(const Def* expr) {
-        bool exists = state_.contains(expr);
+        if (state_.contains(expr))
+            return *state_.at(expr);
 
-        /* TODO for debuging I'm currently using the exit label with goto. remove that paradime if no longer needed */
-        auto& world = expr->world();
-        auto& muts = world.muts();
-
-        if(!exists) state_.emplace(expr, std::make_unique<FVState>());
+        // create new state empty state for expr
+        state_.emplace(expr, std::make_unique<FVState>());
         auto& st = *state_.at(expr); /* make sure that the entry exists */
 
-        // state already exists
-        if (exists) goto exit;
-
-        /* now we have to calculate the local vars : the set of vars reachable by following immutable deps */
-        /* and we have to calculate the local muts : the set of muts reachable by following immutable deps */
-
         /* according to some comments this is per definition right */
-        if (auto var = expr->isa<Var>())
+        if (auto var = expr->isa<Var>()) {
             /* unpack vars if possible */
             for (auto v : var->tprojs()) {
                 st.vars_.emplace(v);
             }
-        else {
-            /* NOTE: QUESTION: I'm not using deps() because that only includes ops if they are set. (is this limitation ok?) */
-            if (auto type = expr->type()) {
-                for (auto def : local_vars(type))
-                    st.vars_.emplace(def);
-                st.muts_ = muts.merge(st.muts_, local_muts(type));
-            }
 
-            for (auto op : expr->ops()) {
-                for (auto def : local_vars(op))
-                    st.vars_.emplace(def);
-                st.muts_ = muts.merge(st.muts_, local_muts(op));
-            }
+            return st;
         }
 
-exit:
+        auto& muts = expr->world().muts();
+
+        /* NOTE: I'll make the assumption that the ops of expr are set */
+        for (auto def : expr->deps()) {
+            for (auto v : local_vars(def))
+                st.vars_.emplace(v);
+            st.muts_ = muts.merge(st.muts_, local_muts(def)); /* TODO maybe replace with def->local_muts() ? */
+        }
+
         return st;
     }
 
@@ -187,6 +180,7 @@ exit:
 
     /// Mutables reachable by following *immutable* deps(); `mut->local_muts()` is by definition the set `{ mut }`.
     Muts local_muts(const Def* expr) {
+        /* TODO relpace with expr->local_muts() ? */
         if (auto mut = expr->isa_mut()) return Muts(mut);
         return get_state(expr).muts_;
     }
@@ -204,7 +198,7 @@ void foo(const Def* expr, DefSet &done, FVAnalysis &ana) {
     std::cout << "new free vars : {";
     for (auto v : ana.free_vars(expr))
         std::cout << v << ", ";
-    std::cout << std::endl;
+    std::cout << "}" << std::endl;
 
     for (auto def : expr->deps())
         foo(def, done, ana);
