@@ -1,4 +1,5 @@
 #include <memory>
+
 #include <mim/driver.h>
 
 #include <mim/ast/parser.h>
@@ -6,12 +7,21 @@
 #include <mim/util/sys.h>
 
 #include <mim/plug/mem/mem.h>
+
 #include "mim/def.h"
 
 #include "mim/plug/core/autogen.h"
 
 using namespace mim;
 using namespace mim::plug;
+
+/*
+ * FIX: QUESTIONS
+ * - good way to test libmim_clos2 internal functions?
+ * - use world().next_run() or my own counter?
+ * - do I need invalidate() ?
+ *   - if so when I use Def::local_muts I'll have to invalidate this Analysis before def->invalidate() gets called
+ */
 
 /**
  * This is used to store the state of the fixedpoint iteration solver.
@@ -31,7 +41,7 @@ public:
          * this means that the free vars are the union of all vars reachable.
          * thus the union of the localvars of all reachable mutables.
          */
-        auto fvs   = local_vars(expr);
+        auto fvs = local_vars(expr);
         for (auto mut : local_muts(expr))
             for (auto v : free_vars(mut))
                 fvs.emplace(v);
@@ -41,7 +51,7 @@ public:
 
     DefSet free_vars(Def* expr) {
         auto& st = get_state(expr);
-        auto& w = expr->world();
+        auto& w  = expr->world();
 
         if (st.mark_ == 0) { /* use fixed-point iteration to recompute free vars */
             bool cyclic = false;
@@ -107,10 +117,9 @@ public:
         }
 
         // FV(lam (x_1,...).e) = FV(e) \ {x_1,...}
-        if (auto var = expr->has_var()) {
+        if (auto var = expr->has_var())
             for (auto v : var->tprojs())
                 fvs.erase(v);
-        }
 
         /* did smt change? */
         if constexpr (!init) todo |= fvs0 != fvs;
@@ -129,22 +138,20 @@ public:
         for (auto v : st.vars_)
             std::cout << v << ", ";
         std::cout << "}\n"
-                  << "muts : " << st.muts_
-                  << std::endl;
+                  << "muts : " << st.muts_ << std::endl;
     }
 
 private:
     struct FVState {
-        u32 mark_  = 0;
+        u32 mark_    = 0;
         DefSet vars_ = {}; // Mutable: local vars; Immutable: free vars.
-        Muts muts_ = {}; // Immutable: local_muts; Mutable: users;
+        Muts muts_   = {}; // Immutable: local_muts; Mutable: users;
     };
 
     DefMap<std::unique_ptr<FVState>> state_;
 
     FVState& get_state(const Def* expr) {
-        if (state_.contains(expr))
-            return *state_.at(expr);
+        if (state_.contains(expr)) return *state_.at(expr);
 
         // create new state empty state for expr
         state_.emplace(expr, std::make_unique<FVState>());
@@ -153,9 +160,8 @@ private:
         /* according to some comments this is per definition right */
         if (auto var = expr->isa<Var>()) {
             /* unpack vars if possible */
-            for (auto v : var->tprojs()) {
+            for (auto v : var->tprojs())
                 st.vars_.emplace(v);
-            }
 
             return st;
         }
@@ -174,9 +180,7 @@ private:
 
     /// Var%s reachable by following *immutable* deps().
     /// @note `var->local_vars()` is by definition the set `{ var }`. TODO this comment was copied from libmim
-    DefSet local_vars(const Def* expr) {
-        return expr->is_mutable() ? DefSet() : get_state(expr).vars_;
-    }
+    DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet() : get_state(expr).vars_; }
 
     /// Mutables reachable by following *immutable* deps(); `mut->local_muts()` is by definition the set `{ mut }`.
     Muts local_muts(const Def* expr) {
@@ -186,11 +190,7 @@ private:
     }
 };
 
-
-
-
-
-void foo(const Def* expr, DefSet &done, FVAnalysis &ana) {
+void foo(const Def* expr, DefSet& done, FVAnalysis& ana) {
     if (!done.emplace(expr).second) return;
 
     std::cout << "\ncomparing free var anas for " << expr << std::endl;
