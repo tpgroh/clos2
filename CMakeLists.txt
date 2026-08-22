@@ -11,3 +11,11 @@ add_mim_plugin(clos2
         src/normalizers.cpp
     INSTALL
 )
+
+if(MIM_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+if (BUILD_TESTING)
+    add_subdirectory(gtest)
+endif()

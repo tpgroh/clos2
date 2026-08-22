@@ -1,0 +1,5 @@
+add_executable(clos2_fv clos2_fv.cpp)
+target_link_libraries(clos2_fv   PRIVATE libmim)
+target_include_directories(clos2_fv PUBLIC ../include/)
+add_dependencies(clos2_fv  mim_all_plugins)
+add_dependencies(mim_all clos2_fv)
