@@ -11,6 +11,21 @@
 using namespace mim;
 using namespace mim::plug;
 
+void foo(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
+    if (!done.emplace(def).second) return;
+
+    auto fv = ana.free_vars(def);
+
+    // print free vars
+    std::cout << "free vars of  " << def << "  (clos2::FVAnalysis, Def::free_vars)\n{";
+    for (auto def : fv)
+        std::cout << def << ", ";
+    std::cout << "}\n" << def->free_vars() << "\n\n";
+
+    for (auto dep : def->deps())
+        foo(dep, done, ana);
+}
+
 TEST(internal, fv) {
     Driver driver;
     auto& w = driver.world();
@@ -33,16 +48,22 @@ TEST(internal, fv) {
 
     outer->dot("tmp.dot");
 
-    auto ana = clos2::FVAnalysis{};
+    // for debugging and showcasing I first calcualte and printout the results for every def
+    auto ana  = clos2::FVAnalysis{};
+    auto done = DefSet{};
+    foo(outer, done, ana);
 
+    // free vars of inner should be {a}
     auto fv = ana.free_vars(inner);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(a));
 
-    // print free vars
-    std::cout << "free vars of inner\n";
-    for (auto def : fv)
-        std::cout << def << ", ";
-    std::cout << "\nlibmim found free vars\n" << inner->free_vars() << std::endl;
+    // free vars of outer should be {}
+    fv = ana.free_vars(outer);
+    ASSERT_EQ(fv.size(), 0);
 
+    // free vars of a should be {a}
+    fv = ana.free_vars(a);
     ASSERT_EQ(fv.size(), 1);
     ASSERT_TRUE(fv.contains(a));
 }

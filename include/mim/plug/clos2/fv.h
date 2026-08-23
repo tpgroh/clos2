@@ -142,6 +142,13 @@ private:
             return st;
         }
 
+        // if def is d#i I want to set vars_ as {def}
+        // TODO: I have to check if this is the correct way
+        if (def->isa<Extract>()) {
+            st.vars_.emplace(def);
+            return st;
+        }
+
         auto& muts = def->world().muts();
 
         /* TODO: I made the assumption that the ops of def are already set. Is this allowed for this? */
