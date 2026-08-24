@@ -13,6 +13,14 @@
     this is problemetic if there are many arguments packed inside the tuple.
     in this case just take the unary as the free var (speed over correctnes)
 
+[ ] Use libabseil node hashmap to map const Def* directly to a state. no unique pointer
+[ ] perform a preproccessing pass to determin if a Extract with non constant index of a var exists in a const Def*
+    If there is such an Extract I dont want to split it up
+    otherwise I can split the Var up. but not if all projections of var were found. then we also want to just put the Var into fv
+[ ] I dont want the var extract in get_state()
+
+[ ] use vars() without threshould for inhomogen tuples ? maybe this will be done in Def::tvars() ?
+
 # Other Stuff for later
 using llvm Landingpads we can sometimes get arround closure conversion
 for escaping stuff we require a garbage collector (for example tinygc)

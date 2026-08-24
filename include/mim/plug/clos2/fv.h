@@ -6,6 +6,8 @@
 
 #include <mim/world.h>
 
+#include "absl/container/node_hash_set.h"
+
 namespace mim::plug::clos2 {
 
 /// @name Free Variable Analysis
@@ -30,7 +32,7 @@ public:
          * thus the union of the localvars of all reachable mutables.
          */
         auto fvs = local_vars(def);
-        for (auto mut : local_muts(def))
+        for (auto mut : def->local_muts())
             for (auto v : free_vars(mut))
                 fvs.emplace(v);
 
@@ -79,10 +81,8 @@ public:
 
         st.mark_ = run;
 
-        auto fvs0  = st.vars_; // create copy to check against later, see if the set changed
-        auto fvs   = fvs0;
-        auto& w    = expr->world();
-        auto& muts = w.muts();
+        auto fvs0 = st.vars_; // create copy to check against later, see if the set changed
+        auto fvs  = fvs0;
 
         for (auto op : expr->deps()) {
             /* we start by adding all from dependencies reachable vars */
@@ -91,14 +91,8 @@ public:
                     fvs.emplace(v);
 
             /* then add the free vars of every from op reachable mutable */
-            for (auto mut : local_muts(op)) {
-                if constexpr (init) {
-                    /* add expr to list of users from mut */
-                    auto& st_mut = get_state(mut);
-                    st_mut.muts_ = muts.insert(st_mut.muts_, expr);
-                }
-
-                /* now we add the free vars of the dependencies */
+            for (auto mut : op->local_muts()) {
+                /* add the free vars of the dependencies */
                 for (auto v : free_vars<init>(todo, run, mut))
                     fvs.emplace(v);
             }
@@ -120,18 +114,17 @@ private:
     struct FVState {
         u32 mark_    = 0;
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
-        Muts muts_   = {}; ///< Immutable: local_muts; Mutable: users;
     };
 
-    DefMap<std::unique_ptr<FVState>> state_;
+    absl::node_hash_map<const Def*, FVState, GIDHash<const Def*>> state_;
 
     /// get the internal state of a Def (creates it if needed)
     FVState& get_state(const Def* def) {
-        if (state_.contains(def)) return *state_.at(def);
+        if (state_.contains(def)) return state_.at(def);
 
         // create new state empty state for def
         state_.emplace(def, std::make_unique<FVState>());
-        auto& st = *state_.at(def);
+        auto& st = state_.at(def);
 
         /* according to some comments this is per definition right */
         if (auto var = def->isa<Var>()) {
@@ -149,27 +142,16 @@ private:
             return st;
         }
 
-        auto& muts = def->world().muts();
-
         /* TODO: I made the assumption that the ops of def are already set. Is this allowed for this? */
-        for (auto def : def->deps()) {
+        for (auto def : def->deps())
             for (auto v : local_vars(def))
                 st.vars_.emplace(v);
-            st.muts_ = muts.merge(st.muts_, local_muts(def)); /* TODO maybe replace with def->local_muts() ? */
-        }
 
         return st;
     }
 
     /// Var%s reachable by following *immutable* deps().
     DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet() : get_state(expr).vars_; }
-
-    /// Mutables reachable by following *immutable* deps(); `local_muts(mut)` is by definition the set `{ mut }`.
-    Muts local_muts(const Def* expr) {
-        /* TODO relpace with expr->local_muts() ? */
-        if (auto mut = expr->isa_mut()) return Muts(mut);
-        return get_state(expr).muts_;
-    }
 };
 
 } // namespace mim::plug::clos2
