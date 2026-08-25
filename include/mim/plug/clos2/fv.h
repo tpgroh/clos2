@@ -2,11 +2,9 @@
 
 // TODO refactor comments
 
-#include <memory>
+#include "mim/def.h"
 
-#include <mim/world.h>
-
-#include "absl/container/node_hash_set.h"
+#include "mim/util/util.h"
 
 namespace mim::plug::clos2 {
 
@@ -116,28 +114,19 @@ private:
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
     };
 
-    absl::node_hash_map<const Def*, FVState, GIDHash<const Def*>> state_;
+    GIDNodeMap<const Def*, FVState> state_;
 
     /// get the internal state of a Def (creates it if needed)
     FVState& get_state(const Def* def) {
         if (state_.contains(def)) return state_.at(def);
 
         // create new state empty state for def
-        state_.emplace(def, std::make_unique<FVState>());
-        auto& st = state_.at(def);
-
-        /* according to some comments this is per definition right */
-        if (auto var = def->isa<Var>()) {
-            /* unpack vars if possible */
-            for (auto v : var->tprojs())
-                st.vars_.emplace(v);
-
-            return st;
-        }
+        auto& st = state_[def]; // default initializes the state
 
         // if def is d#i I want to set vars_ as {def}
-        // TODO: I have to check if this is the correct way
+        // WARN: this is not correct
         if (def->isa<Extract>()) {
+            // TODO: check if ext->index() is constant
             st.vars_.emplace(def);
             return st;
         }
