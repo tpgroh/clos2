@@ -2,7 +2,12 @@
 
 // TODO refactor comments
 
+#include <algorithm>
+#include <optional>
+
 #include "mim/def.h"
+#include "mim/tuple.h"
+#include "mim/world.h"
 
 #include "mim/util/util.h"
 
@@ -108,11 +113,43 @@ public:
         return st.vars_ = fvs;
     }
 
+    void get_extractions(const Def* def, DefMap<u64>& map) {
+        // if def is a Var then every extraction of Var is in def
+        if (def->isa<Var>()) map[def] = ~((u64)0);
+
+        // if def is an Extract we have to check if the Index is constant and if so add it. otherwise the entire
+        // Extract::tuple()
+        else if (auto ext = def->isa<Extract>())
+            if (auto idx = Lit::isa<u64>(ext->index()); idx && idx < threshold_)
+                map[ext->tuple()] |= 1ull << idx.value();
+
+            // add all extracts of ext->tuple()
+            // using get_extractions will recurse and has the following effects dependent on what ext->tuple() is
+            // - Var then add (ext->tuple(), 1111..1111) to the map meaning all extractions of it where found
+            // - v#j then add (v, j) to the map
+            // and so on.
+            // The Idea is that we stop on our way down to var if the extraction was constant
+            else
+                get_extractions(ext->tuple(), map);
+
+        // if both were not the case I'll have to go over the deps
+        // TODO: maybe I'll always have to do that?
+        else
+            for (auto dep : def->deps())
+                get_extractions(dep, map);
+
+        // now we want to shrink the map because we might have
+        // v#i and (v#i)#...#j in the map in which case we just want v#i
+        // TODO: I currently don't know how this could be done
+    }
+
 private:
     struct FVState {
         u32 mark_    = 0;
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
     };
+
+    u64 threshold_ = 64; ///< The threshold at which arity we dont split up anymore
 
     GIDNodeMap<const Def*, FVState> state_;
 
