@@ -2,7 +2,7 @@
 
 // TODO refactor comments
 
-#include <algorithm>
+#include <bit>
 #include <optional>
 
 #include "mim/def.h"
@@ -113,86 +113,12 @@ public:
         return st.vars_ = fvs;
     }
 
-    bool clean_extractions_for(const Def* def, DefMap<u64>& map) {
-        if (auto ext = def->isa<Extract>()) {
-            // remove all succeeding extractions from def's which are already in the map
-            if (clean_extractions_for(ext->tuple(), map)) {
-                auto it = map.find(ext);
-                if (it != map.end()) map.erase(it);
-
-                // we have to pass true down to remove succeeding extractions
-                return true;
-            }
-        }
-
-        // if def is in the map I can remove every extraction of it from the map
-        return map.contains(def);
-    }
-
-    /// @brief is extraction already directly or indirectly in the map
-    bool is_extraction_covered(const Def* def, uint8_t idx, DefMap<u64>& map) {
-        // if idx is not in [0,64) then we mean if there is an extraction which is including def
-
-        u64 mask = 1ull << idx;
-        if (map.contains(def) && map.at(def) == -1ull) return true;
-
-        // if def is an Extract then check if def is in map or ext->tuple() is covered by the map
-        if (auto ext = def->isa<Extract>()) return is_extraction_covered(ext->tuple(), map);
-    }
-
-    void get_extractions(const Def* def, DefMap<u64>& map) {
-        // if def is a Var then every extraction of Var is in def
-        if (def->isa<Var>()) map[def] = ~((u64)0);
-        // NOTE: if there were already extractions of the var inside the map
-        // they will be removed in the end
-        // TODO: If I had a map from var to extractions of this var I could remove them right here
-        // maybe nodemap from (Def, Var) to DefSet?
-
-        // if def is an Extract we have to check if the Index is constant and if so add it. otherwise the entire
-        // Extract::tuple()
-        else if (auto ext = def->isa<Extract>())
-            if (auto idx = Lit::isa<u64>(ext->index()); idx && idx < threshold_) {
-                // TODO: only add if not included in any ext before
-                map[ext->tuple()] |= 1ull << idx.value();
-            }
-
-            // add all extracts of ext->tuple()
-            // using get_extractions will recurse and has the following effects dependent on what ext->tuple() is
-            // - Var then add (ext->tuple(), 1111..1111) to the map meaning all extractions of it where found
-            // - v#j then add (v, j) to the map
-            // and so on.
-            // The Idea is that we stop on our way down to var if the extraction was constant
-            else
-                get_extractions(ext->tuple(), map);
-
-        // if both were not the case I'll have to go over the deps
-        // TODO: I cannot do this in every case but maybe in some and maybee always on the type?
-        else
-            for (auto dep : def->deps())
-                get_extractions(dep, map);
-
-        // TODO: if there are a certain amount of bits set for a Def I wannt to set them all.
-        // TODO if all bits of an extraction are set I want to add (ext->tuple(), bitmap for ext->index()) to the map
-        // and remove the entry for ext
-
-        // WARN: this currently a hacky way to do cleanup
-        // I just want to test this before thinking to long about how to make this fast
-        DefSet defs_{};
-        for (auto def : map)
-            defs_.insert(def.first);
-
-        for (auto def : defs_)
-            clean_extractions_for(def, map);
-    }
-
 private:
     struct FVState {
         u32 mark_    = 0;
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
         // TODO: cache the extractions in the state
     };
-
-    u64 threshold_ = 64; ///< The threshold at which arity we dont split up anymore
 
     GIDNodeMap<const Def*, FVState> state_;
 
@@ -221,6 +147,126 @@ private:
 
     /// Var%s reachable by following *immutable* deps().
     DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet() : get_state(expr).vars_; }
+};
+
+class EXAnalysis {
+public:
+    void get_extractions(const Def* def) {
+        // if def is Var then set the extractions of def to be all of def
+        if (auto var = def->isa<Var>()) {
+            // clear extractions
+            auto map = (state_[var] = DefMap<u64>{});
+
+            // put var inside
+            map[var] = -1ull;
+        }
+
+        // if def is Extract then add it to the state of the Var from which it extracts
+        else if (auto ext = def->isa<Extract>()) {
+            // find the enclosed Var
+            const Def* tmp = ext->tuple();
+            while (auto t = tmp->isa<Extract>())
+                tmp = t->tuple();
+            auto var = tmp->isa<Var>(); // NOTE: I now expect tmp to be a Var
+            assert(var);                // TODO: could there be something other then Var?
+
+            // add extract to state of var
+            auto map = state_[var];
+
+            // if extract is already covered I can stop
+            //   this is the case if transitively at least one of tuple() is already in the state
+            // if the index is constant and the arity is such that I can unpack and not all arity bits would be set
+            // afterwards, then set index bit of ext->tuple()
+            //   this can be done by seting the bit and then check the count of set bits against the tarity of tuple()
+            //   where we maxout tarity at 64
+            // otherwise all indices are reachable so we add all extractions of ext->tuple() to be reachable
+            //   - if tuple() is a var we want to set all bits
+            //   - if tuple() is v#i I want to add v with set index bit i to the state of var
+            //   this can be done by removing tuple() from the state and then add it using recursion
+            //
+            // TODO: QUESTION: if any of the extractions in ext have arity over the global threshold or 64 should I
+            // unpack ? for example v has arity 1000000 but the extractions reachable are only v#1 which has arity 4
+            // should I set the reachable extractions to {v} or {v#1} I'm currently going for the second one
+            //
+            // TODO: if I add an extraction v#i but v#i#j is already in the map, then I have to remove v#i#j
+
+            // check if index is constant
+            u64 idx_map = get_extraction_idxMap(ext);
+
+            { // check if extract is already covered
+                const Def* tmp  = ext;
+                auto tmp_idxMap = idx_map;
+                do {
+                    // get tuple
+                    if (auto ext = tmp->isa<Extract>()) {
+                        tmp        = ext->tuple();
+                        tmp_idxMap = get_extraction_idxMap(ext);
+                    } else
+                        assert(tmp
+                               == var); // NOTE: at the start to find var we already checked that this has to be true
+
+                    if (auto it = map.find(tmp); (it != map.end()) && (it->second & tmp_idxMap)) goto covered;
+                } while (tmp != var);
+            }
+
+            // now we know that ext is not already covered by any other extraction inside the state of var
+
+            // set index bit(s) if we dont set all bits.
+            // in that case we dont want to potentially add (ext->tuple(), -1ull) to the hashmap just to remove it again
+            if (idx_map != -1ull) idx_map = (map[ext->tuple()] |= idx_map);
+
+            // check count of set bits to find out if all num_tprojs() extractions from ext->tuple() are collected
+            // NOTE: on modern cpus there is an instruction for that and a good compiler should use that here
+            if (static_cast<nat_t>(std::popcount(idx_map)) >= ext->tuple()->num_tprojs()) {
+                // if ext->tuple() was Var just mark all extractions of ext->tuple() as reachable
+                if (ext->tuple()->isa<Var>()) {
+                    assert(ext->tuple() == var);
+                    map[ext->tuple()] = -1ull; // all extractions of var are reachable
+                } else {
+                    // remove ext->tuple() from the map if it was in the map (might not be if we skiped insertion above)
+                    auto it = map.find(ext->tuple());
+                    if (it != map.end()) map.erase(it);
+
+                    // mark every extraction of ext->tuple() as reachable by using recursion
+                    get_extractions(ext->tuple());
+                }
+            }
+
+covered: // this label is used to skip the above code if the extraction was already covered by any other extraction in
+         // the state of var
+        }
+
+        // def was not an Extract so we collect all extractions from all deps()
+        else {
+            for (auto dep : def->deps())
+                get_extractions(dep);
+        }
+
+        // TODO: I'm currently not sure If I need to collect the extractions from def->type() in every case but I would
+        // guess so.
+    }
+
+private:
+    /// return a bitmask for the index of Extract
+    /// returns -1ull if the index is not constant and in the valid range
+    u64 get_extraction_idxMap(const Extract* ext) {
+        assert(ext);
+
+        // ext->tuple() should not be unpacked NOTE: I maxout at 64 because I use u64 bitmaps to store the extracted
+        // indices
+        if (auto i = ext->tuple()->num_tprojs(); i == 1 || i >= 64)
+            return -1ull;
+        else if (auto idx = Lit::isa(ext->index())) {
+            assert(idx < 64); // TODO: QUESTION: is the nat_t value in Idx always the smallest in [0,m) where m is the
+                              // modus of Idx?
+            return 1ull << *idx;
+        }
+
+        return -1ull;
+    }
+
+private:
+    GIDNodeMap<const Var*, DefMap<u64>> state_ = {};
 };
 
 } // namespace mim::plug::clos2
