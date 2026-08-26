@@ -153,51 +153,66 @@ private:
 class EXAnalysis {
 public:
     /// perform extraction analysis on the given def
-    EXAnalysis(const Def* def) { get_extractions(def); }
+    EXAnalysis(const Def* def) {
+        get_extractions(def);
 
-    /// get the extractions made on the given var
-    std::optional<DefMap<u64>> get(const Var* var) {
-        auto it = state_.find(var);
-        if (it == state_.end()) return {};
-        return it->second;
+        // TODO: cleanup extractions which are covered by other extractions
     }
 
-    // TODO: delete this after testing
-    void print_state() {
+    void printState() {
         for (auto [var, map] : state_) {
-            std::cout << "collected Extractions of Var : " << var << std::endl;
-            for (auto e : map)
-                std::cout << e.first << " with bitmask " << std::format("{:b}\n", e.second);
+            std::cout << "extractions of " << var << std::endl;
+            for (auto [def, idx] : map) {
+                if (idx.size() == 0)
+                    std::cout << def;
+                else {
+                    std::cout << def << " # ";
+                    for (bool b : std::views::reverse(idx))
+                        std::cout << b;
+                }
+                std::cout << std::endl;
+            }
         }
     }
 
 private:
-    /// return a bitmask for the index of Extract
-    /// returns -1ull if the index is not constant and in the valid range
-    u64 get_extraction_idxMap(const Extract* ext) {
-        assert(ext);
+    /// get the index if const otherwise nullopt
+    std::optional<nat_t> getConstIdx(const Extract* ext) {
+        auto a = Lit::isa(ext->index());
+        auto i = ext->tuple()->num_tprojs();
 
-        // ext->tuple() should not be unpacked NOTE: I maxout at 64 because I use u64 bitmaps to store the extracted
-        // indices
-        if (auto i = ext->tuple()->num_tprojs(); i == 1 || i >= 64)
-            return -1ull;
-        else if (auto idx = Lit::isa(ext->index())) {
-            assert(idx < 64); // TODO: QUESTION: is the nat_t value in Idx always the smallest in [0,m) where m is the
-                              // modus of Idx?
-            return 1ull << *idx;
+        if (a && i > 1) {
+            assert(*a < i); // TODO: this should always be the case so it should be save to removes this
+            return a;
+        }
+        return {};
+    }
+
+    /// check if extract is already covered by any other extract in the state of var
+    bool isExtCovered(const Extract* ext, const DefMap<std::vector<bool>>& map) {
+        // if the tuple is a var we just have to check if it is already in the map
+        if (auto v = ext->tuple()->isa<Var>()) return map.contains(v);
+
+        auto idx = getConstIdx(ext);
+
+        if (!idx || !map.contains(ext->tuple())) {
+            ext = ext->tuple()->isa<Extract>(); // we expect an extract because the tuple() is not a Var
+            assert(ext);                        // TODO: could there be anything else?
+            return isExtCovered(ext, map);      // use t-recursion
         }
 
-        return -1ull;
+        if (map.at(ext->tuple()).size() < *idx) return false;
+        return map.at(ext->tuple())[*idx];
     }
 
     void get_extractions(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
         if (auto var = def->isa<Var>()) {
             // clear extractions
-            auto& map = (state_[var] = DefMap<u64>{});
+            auto& map = (state_[var] = DefMap<std::vector<bool>>{});
 
             // put var inside
-            map[var] = -1ull;
+            map[var]; // for Var's we do not have to set any bits
         }
 
         // if def is Extract then add it to the state of the Var from which it extracts
@@ -226,65 +241,49 @@ private:
             // TODO: QUESTION: if any of the extractions in ext have arity over the global threshold or 64 should I
             // unpack ? for example v has arity 1000000 but the extractions reachable are only v#1 which has arity 4
             // should I set the reachable extractions to {v} or {v#1} I'm currently going for the second one
-            //
-            // TODO: if I add an extraction v#i but v#i#j is already in the map, then I have to remove v#i#j
+
+            if (isExtCovered(ext, map)) return;
 
             // check if index is constant
-            u64 idx_map = get_extraction_idxMap(ext);
-
-            { // check if extract is already covered
-                const Def* tmp  = ext;
-                auto tmp_idxMap = idx_map;
-                do {
-                    // get tuple
-                    if (auto ext = tmp->isa<Extract>()) {
-                        tmp        = ext->tuple();
-                        tmp_idxMap = get_extraction_idxMap(ext);
-                    } else // NOTE: at the start to find var we already checked that this has to be true
-                        assert(tmp == var);
-
-                    if (auto it = map.find(tmp); (it != map.end()) && (it->second & tmp_idxMap)) goto covered;
-                } while (tmp != var);
-            }
-
-            // now we know that ext is not already covered by any other extraction inside the state of var
+            auto idx = getConstIdx(ext);
 
             // set index bit(s) if we dont set all bits.
             // in that case we dont want to potentially add (ext->tuple(), -1ull) to the hashmap just to remove it again
-            if (idx_map != -1ull) idx_map = (map[ext->tuple()] |= idx_map);
+            if (idx) {
+                if (map[ext->tuple()].size() <= *idx) map[ext->tuple()].resize(*idx + 1);
+                map[ext->tuple()][*idx] = true; // TODO: update counter how many bits are set
+            }
 
-            // check count of set bits to find out if all num_tprojs() extractions from ext->tuple() are collected
-            // NOTE: on modern cpus there is an instruction for that and a good compiler should use that here
-            if (static_cast<nat_t>(std::popcount(idx_map)) >= ext->tuple()->num_tprojs()) {
-                // if ext->tuple() was Var just mark all extractions of ext->tuple() as reachable
+            if (!idx) { // TODO: or the count of how many bits are set is equal to num_tprojs()
                 if (ext->tuple()->isa<Var>()) {
                     assert(ext->tuple() == var);
-                    map[ext->tuple()] = -1ull; // all extractions of var are reachable
+                    map[ext->tuple()]; // add var to map
                 } else {
                     // remove ext->tuple() from the map if it was in the map (might not be if we skiped insertion above)
                     auto it = map.find(ext->tuple());
                     if (it != map.end()) map.erase(it);
 
-                    // mark every extraction of ext->tuple() as reachable by using recursion
-                    get_extractions(ext->tuple());
+                    // mark every extraction of ext->tuple() as reachable by using t-recursion
+                    return get_extractions(ext->tuple());
                 }
             }
-
-covered: // this label is used to skip the above code if the extraction was already covered by any other extraction in
-         // the state of var
         }
 
-        // def was not an Extract so we collect all extractions from all deps()
+        // def was not an Extract so we collect all extractions from it's deps()
         else
+            // TODO: it could be that I dont want to do this or at least that I dont want to include the type. I have to
+            // check later
             for (auto dep : def->deps())
                 get_extractions(dep);
-
-        // TODO: I'm currently not sure If I need to collect the extractions from def->type() in every case but I would
-        // guess so.
     }
 
 private:
-    GIDNodeMap<const Var*, DefMap<u64>> state_ = {};
+    // TODO: for bitmaps and bitsets I was using functions which will generate popcount instructions to count the number
+    // of set bits. when I searched for similar functions for std::vector<bool> I did not find anything that looked like
+    // that exists. So I have to pay a most likely high price for counting or I have to keep the count of set bits
+    // inside the state by wraping the std::vector<bool> by struct which also keeps the count
+
+    GIDNodeMap<const Var*, DefMap<std::vector<bool>>> state_ = {};
 };
 
 } // namespace mim::plug::clos2
