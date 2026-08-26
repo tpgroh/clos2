@@ -129,15 +129,32 @@ public:
         return map.contains(def);
     }
 
+    /// @brief is extraction already directly or indirectly in the map
+    bool is_extraction_covered(const Def* def, uint8_t idx, DefMap<u64>& map) {
+        // if idx is not in [0,64) then we mean if there is an extraction which is including def
+
+        u64 mask = 1ull << idx;
+        if (map.contains(def) && map.at(def) == -1ull) return true;
+
+        // if def is an Extract then check if def is in map or ext->tuple() is covered by the map
+        if (auto ext = def->isa<Extract>()) return is_extraction_covered(ext->tuple(), map);
+    }
+
     void get_extractions(const Def* def, DefMap<u64>& map) {
         // if def is a Var then every extraction of Var is in def
         if (def->isa<Var>()) map[def] = ~((u64)0);
+        // NOTE: if there were already extractions of the var inside the map
+        // they will be removed in the end
+        // TODO: If I had a map from var to extractions of this var I could remove them right here
+        // maybe nodemap from (Def, Var) to DefSet?
 
         // if def is an Extract we have to check if the Index is constant and if so add it. otherwise the entire
         // Extract::tuple()
         else if (auto ext = def->isa<Extract>())
-            if (auto idx = Lit::isa<u64>(ext->index()); idx && idx < threshold_)
+            if (auto idx = Lit::isa<u64>(ext->index()); idx && idx < threshold_) {
+                // TODO: only add if not included in any ext before
                 map[ext->tuple()] |= 1ull << idx.value();
+            }
 
             // add all extracts of ext->tuple()
             // using get_extractions will recurse and has the following effects dependent on what ext->tuple() is
@@ -154,11 +171,6 @@ public:
             for (auto dep : def->deps())
                 get_extractions(dep, map);
 
-        // now we want to shrink the map because we might have
-        // v#i and (v#i)#...#j in the map in which case we just want v#i
-        // TODO: I currently don't know how this could be done
-        //
-        // now the cleanup of the map
         // TODO: if there are a certain amount of bits set for a Def I wannt to set them all.
         // TODO if all bits of an extraction are set I want to add (ext->tuple(), bitmap for ext->index()) to the map
         // and remove the entry for ext
