@@ -113,6 +113,22 @@ public:
         return st.vars_ = fvs;
     }
 
+    bool clean_extractions_for(const Def* def, DefMap<u64>& map) {
+        if (auto ext = def->isa<Extract>()) {
+            // remove all succeeding extractions from def's which are already in the map
+            if (clean_extractions_for(ext->tuple(), map)) {
+                auto it = map.find(ext);
+                if (it != map.end()) map.erase(it);
+
+                // we have to pass true down to remove succeeding extractions
+                return true;
+            }
+        }
+
+        // if def is in the map I can remove every extraction of it from the map
+        return map.contains(def);
+    }
+
     void get_extractions(const Def* def, DefMap<u64>& map) {
         // if def is a Var then every extraction of Var is in def
         if (def->isa<Var>()) map[def] = ~((u64)0);
@@ -133,7 +149,7 @@ public:
                 get_extractions(ext->tuple(), map);
 
         // if both were not the case I'll have to go over the deps
-        // TODO: maybe I'll always have to do that?
+        // TODO: I cannot do this in every case but maybe in some and maybee always on the type?
         else
             for (auto dep : def->deps())
                 get_extractions(dep, map);
@@ -141,12 +157,27 @@ public:
         // now we want to shrink the map because we might have
         // v#i and (v#i)#...#j in the map in which case we just want v#i
         // TODO: I currently don't know how this could be done
+        //
+        // now the cleanup of the map
+        // TODO: if there are a certain amount of bits set for a Def I wannt to set them all.
+        // TODO if all bits of an extraction are set I want to add (ext->tuple(), bitmap for ext->index()) to the map
+        // and remove the entry for ext
+
+        // WARN: this currently a hacky way to do cleanup
+        // I just want to test this before thinking to long about how to make this fast
+        DefSet defs_{};
+        for (auto def : map)
+            defs_.insert(def.first);
+
+        for (auto def : defs_)
+            clean_extractions_for(def, map);
     }
 
 private:
     struct FVState {
         u32 mark_    = 0;
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
+        // TODO: cache the extractions in the state
     };
 
     u64 threshold_ = 64; ///< The threshold at which arity we dont split up anymore
