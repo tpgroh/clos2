@@ -149,13 +149,52 @@ private:
     DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet() : get_state(expr).vars_; }
 };
 
+/// Analyse the extractions which are beeing made inside a Def
 class EXAnalysis {
 public:
+    /// perform extraction analysis on the given def
+    EXAnalysis(const Def* def) { get_extractions(def); }
+
+    /// get the extractions made on the given var
+    std::optional<DefMap<u64>> get(const Var* var) {
+        auto it = state_.find(var);
+        if (it == state_.end()) return {};
+        return it->second;
+    }
+
+    // TODO: delete this after testing
+    void print_state() {
+        for (auto [var, map] : state_) {
+            std::cout << "collected Extractions of Var : " << var << std::endl;
+            for (auto e : map)
+                std::cout << e.first << " with bitmask " << std::format("{:b}\n", e.second);
+        }
+    }
+
+private:
+    /// return a bitmask for the index of Extract
+    /// returns -1ull if the index is not constant and in the valid range
+    u64 get_extraction_idxMap(const Extract* ext) {
+        assert(ext);
+
+        // ext->tuple() should not be unpacked NOTE: I maxout at 64 because I use u64 bitmaps to store the extracted
+        // indices
+        if (auto i = ext->tuple()->num_tprojs(); i == 1 || i >= 64)
+            return -1ull;
+        else if (auto idx = Lit::isa(ext->index())) {
+            assert(idx < 64); // TODO: QUESTION: is the nat_t value in Idx always the smallest in [0,m) where m is the
+                              // modus of Idx?
+            return 1ull << *idx;
+        }
+
+        return -1ull;
+    }
+
     void get_extractions(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
         if (auto var = def->isa<Var>()) {
             // clear extractions
-            auto map = (state_[var] = DefMap<u64>{});
+            auto& map = (state_[var] = DefMap<u64>{});
 
             // put var inside
             map[var] = -1ull;
@@ -171,7 +210,7 @@ public:
             assert(var);                // TODO: could there be something other then Var?
 
             // add extract to state of var
-            auto map = state_[var];
+            auto& map = state_[var];
 
             // if extract is already covered I can stop
             //   this is the case if transitively at least one of tuple() is already in the state
@@ -201,9 +240,8 @@ public:
                     if (auto ext = tmp->isa<Extract>()) {
                         tmp        = ext->tuple();
                         tmp_idxMap = get_extraction_idxMap(ext);
-                    } else
-                        assert(tmp
-                               == var); // NOTE: at the start to find var we already checked that this has to be true
+                    } else // NOTE: at the start to find var we already checked that this has to be true
+                        assert(tmp == var);
 
                     if (auto it = map.find(tmp); (it != map.end()) && (it->second & tmp_idxMap)) goto covered;
                 } while (tmp != var);
@@ -237,32 +275,12 @@ covered: // this label is used to skip the above code if the extraction was alre
         }
 
         // def was not an Extract so we collect all extractions from all deps()
-        else {
+        else
             for (auto dep : def->deps())
                 get_extractions(dep);
-        }
 
         // TODO: I'm currently not sure If I need to collect the extractions from def->type() in every case but I would
         // guess so.
-    }
-
-private:
-    /// return a bitmask for the index of Extract
-    /// returns -1ull if the index is not constant and in the valid range
-    u64 get_extraction_idxMap(const Extract* ext) {
-        assert(ext);
-
-        // ext->tuple() should not be unpacked NOTE: I maxout at 64 because I use u64 bitmaps to store the extracted
-        // indices
-        if (auto i = ext->tuple()->num_tprojs(); i == 1 || i >= 64)
-            return -1ull;
-        else if (auto idx = Lit::isa(ext->index())) {
-            assert(idx < 64); // TODO: QUESTION: is the nat_t value in Idx always the smallest in [0,m) where m is the
-                              // modus of Idx?
-            return 1ull << *idx;
-        }
-
-        return -1ull;
     }
 
 private:
