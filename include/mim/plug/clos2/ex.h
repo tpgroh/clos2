@@ -6,10 +6,11 @@
 
 #include "mim/def.h"
 #include "mim/tuple.h"
+#include "mim/world.h"
 
 #include "mim/util/util.h"
 
-namespace mim::plug::clos2::fv {
+namespace mim::plug::clos2 {
 
 // TODO: I wanted to use the bitmap to speed up the union of results.
 // maybe now with std::vector<bool> this is to slow to justyfy not just using a tree
@@ -85,6 +86,16 @@ struct EXState {
         if (idx_map.size() <= idx) return false;
         return idx_map[idx];
     }
+
+    void createExtractions(const Def* tuple, DefSet& set) const {
+        if (isAllSet()) {
+            set.insert(tuple);
+            return;
+        }
+
+        for (size_t idx = 0; idx < idx_map.size(); idx++)
+            if (idx_map[idx]) set.insert(tuple->world().extract(tuple, idx));
+    }
 };
 
 /// Analyse the extractions which are beeing made inside a Def
@@ -93,6 +104,22 @@ private:
     friend auto& getState(const EXAnalysis& other) { return other.state_; }
 
 public:
+    /// get the set of extraction from the state
+    DefSet getSet() const {
+        DefSet set{};
+
+        for (const auto& [var, map] : state_)
+            for (const auto& [tuple, exstate] : map)
+                exstate.createExtractions(tuple, set);
+
+        return set;
+    }
+
+    /// remove every extraction of the given var from the state
+    void drop(const Var* var) {
+        if (auto it = state_.find(var); it != state_.end()) state_.erase(it);
+    }
+
     bool include(const EXAnalysis& other) {
         auto& ostate = getState(other);
 
@@ -241,4 +268,4 @@ private: // state
     GIDNodeMap<const Var*, DefMap<EXState>> state_ = {};
 };
 
-} // namespace mim::plug::clos2::fv
+} // namespace mim::plug::clos2
