@@ -155,8 +155,19 @@ public:
     /// perform extraction analysis on the given def
     EXAnalysis(const Def* def) {
         get_extractions(def);
-
         // TODO: cleanup extractions which are covered by other extractions
+        // or don't cleanup and just use the result in a second pass to findout if the extraction is covered
+    }
+
+    bool isCovored(const Def* def) const {
+        if (auto var = def->isa<Var>()) {
+            if (!state_.contains(var)) return false;
+            if (!state_.at(var).contains(var)) return false;
+            if (state_.at(var).at(var).size() == 0) return true;
+            return false;
+        }
+
+        return false;
     }
 
     void printState() {
@@ -205,6 +216,15 @@ private:
         return map.at(ext->tuple())[*idx];
     }
 
+    const Var* getVarOfExt(const Extract* ext) {
+        const Def* tmp = ext->tuple();
+        while (auto t = tmp->isa<Extract>())
+            tmp = t->tuple();
+        auto var = tmp->isa<Var>(); // NOTE: I now expect tmp to be a Var
+        assert(var);                // TODO: could there be something other then Var?
+        return var;
+    }
+
     void get_extractions(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
         if (auto var = def->isa<Var>()) {
@@ -212,17 +232,13 @@ private:
             auto& map = (state_[var] = DefMap<std::vector<bool>>{});
 
             // put var inside
-            map[var]; // for Var's we do not have to set any bits
+            map[var].resize(0); // for Var's we do not have to set any bits
         }
 
         // if def is Extract then add it to the state of the Var from which it extracts
         else if (auto ext = def->isa<Extract>()) {
             // find the enclosed Var
-            const Def* tmp = ext->tuple();
-            while (auto t = tmp->isa<Extract>())
-                tmp = t->tuple();
-            auto var = tmp->isa<Var>(); // NOTE: I now expect tmp to be a Var
-            assert(var);                // TODO: could there be something other then Var?
+            auto var = getVarOfExt(ext);
 
             // add extract to state of var
             auto& map = state_[var];
