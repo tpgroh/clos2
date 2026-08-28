@@ -20,14 +20,16 @@ struct EXState {
     // TODO: use std::vector<u32> to speed up union
 
     u16 count                 = 0;  ///< the count of set bits
+    bool allSet               = 0;  ///< is all set
     std::vector<bool> idx_map = {}; ///< dynamic index bit map
 
     /// set all indices to true
     bool setAll() {
-        if (idx_map.size() == 0) return false;
+        if (isAllSet()) return false;
 
         count = 0;
         idx_map.resize(0);
+        allSet = true;
 
         return true;
     }
@@ -60,34 +62,24 @@ struct EXState {
     }
 
     /// are all idx set
-    bool isAllSet() const { return idx_map.size() == 0; }
+    bool isAllSet() const { return allSet; }
 
     /// check if an index is already set
     bool isIdxSet(nat_t idx) const {
-        if (idx_map.size() == 0) return true; // this is the same as all bits beeing set
+        if (isAllSet()) return true; // this is the same as all bits being set
         if (idx_map.size() <= idx) return false;
         return idx_map[idx];
     }
 
     std::optional<const Def*> get(const Def* tuple, std::optional<nat_t> idx) const {
+        if (isAllSet()) return tuple;
+
         if (idx) {
             if (isIdxSet(*idx)) return tuple->world().extract(tuple, *idx);
             return {};
-        } else {
-            if (isAllSet()) return tuple;
-            return {};
-        }
-    }
-
-    // TODO: remove
-    void createExtractions(const Def* tuple, DefSet& set) const {
-        if (isAllSet()) {
-            set.insert(tuple);
-            return;
         }
 
-        for (size_t idx = 0; idx < idx_map.size(); idx++)
-            if (idx_map[idx]) set.insert(tuple->world().extract(tuple, idx));
+        return {};
     }
 };
 
@@ -100,22 +92,6 @@ public:
     /// create extraction analysis for def
     EXAnalysis(const Def* def) { include(def); }
 
-    /// get the set of extraction from the state
-    DefSet getSet() const {
-        DefSet set{};
-
-        for (const auto& [var, map] : state_)
-            for (const auto& [tuple, exstate] : map)
-                exstate.createExtractions(tuple, set);
-
-        return set;
-    }
-
-    /// remove every extraction of the given var from the state
-    void drop(const Var* var) {
-        if (auto it = state_.find(var); it != state_.end()) state_.erase(it);
-    }
-
     bool include(const EXAnalysis& other) {
         auto& ostate = getState(other);
 
@@ -125,10 +101,13 @@ public:
         for (const auto& [var, map] : ostate)
             for (const auto& [tuple, exstate] : map) {
                 if (tuple->isa<Var>()) {
-                    bool change = state_[var][var].unify(exstate);
+                    bool change = state_[var][tuple].unify(exstate);
 
                     // maybe we just added the last missing extraction.
-                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) state_[var][var].setAll();
+                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
+                        std::cout << "collected all extractions of var " << tuple << "\n";
+                        state_[var][tuple].setAll();
+                    }
                     anychange |= change;
                 } else {
                     // if tuple is already covered then tuple#exstate is also covered
@@ -141,6 +120,7 @@ public:
 
                     // maybe we just included all or collected the last missing extractions so peal one off
                     if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
+                        std::cout << "peal of from " << ext << "\n";
                         auto it = state_[var].find(tuple);
                         assert(it != state_[var].end());
                         state_[var].erase(it);
@@ -162,6 +142,7 @@ public:
 
             // put var inside
             map[var].setAll();
+            std::cout << "added all extractions of var " << var << "\n";
         }
 
         // if def is Extract then add it to the state of the Var from which it extracts
@@ -194,13 +175,18 @@ public:
 
             // set index bit(s) if we dont set all bits.
             // in that case we dont want to potentially add (ext->tuple(), -1ull) to the hashmap just to remove it again
-            if (idx) map[ext->tuple()].setIdx(*idx);
+            if (idx) {
+                map[ext->tuple()].setIdx(*idx);
+                std::cout << "setting idx " << *idx << " for " << ext->tuple() << "\n";
+            }
 
             if (!idx || map[ext->tuple()].count >= ext->tuple()->num_tprojs()) {
                 if (ext->tuple()->isa<Var>()) {
                     assert(ext->tuple() == var);
                     map[ext->tuple()].setAll(); // add var to map
+                    std::cout << "setting all idx for " << ext->tuple() << "\n";
                 } else {
+                    std::cout << "peal of " << ext;
                     // remove ext->tuple() from the map if it was in the map (might not be if we skiped insertion above)
                     auto it = map.find(ext->tuple());
                     if (it != map.end()) map.erase(it);
@@ -220,23 +206,25 @@ public:
     }
 
     /// get highest covered extraction from def
-    std::optional<const Def*> getCovering(const Def* def) {
+    std::optional<const Def*> getCovering(const Def* def) const {
         if (auto var = def->isa<Var>()) {
-            if (state_.contains(var)) return def;
-            return {};
+            if (!state_.contains(var)) return {};
+            if (!state_.at(var).contains(def)) return {};
+            if (!state_.at(var).at(def).isAllSet()) return {};
+            return def;
         }
 
         else if (auto ext = def->isa<Extract>()) {
             auto var = getVarOfExt(ext);
             if (!state_.contains(var)) return {};
-            auto map = state_[var];
+            auto map = state_.at(var);
             return getCovering(ext, map);
         }
 
         return {};
     }
 
-    std::optional<const Def*> getCovering(const Extract* ext, const DefMap<EXState>& map) {
+    std::optional<const Def*> getCovering(const Extract* ext, const DefMap<EXState>& map) const {
         auto idx = getConstIdx(ext);
 
         // if the tuple is a var we just have to check if it is already in the map
@@ -254,6 +242,7 @@ public:
         return map.at(ext->tuple()).get(ext->tuple(), idx);
     }
 
+    /// create the smallest Covering of a DefSet
     DefSet getCovering(const DefSet& old) {
         DefSet set;
 
@@ -266,9 +255,18 @@ public:
         return set;
     }
 
+    void print() {
+        std::cout << "print EXAnalysis state\n";
+        for (auto& [var, _] : state_) {
+            std::cout << "  extractions of " << var << "\n";
+            for (auto& [tuple, _] : state_.at(var))
+                std::cout << "    " << tuple << "#" << (state_.at(var).at(tuple).isAllSet() ? "ALL" : "???") << "\n";
+        }
+    }
+
 private: // helpers
     /// get the index if const otherwise nullopt
-    std::optional<nat_t> getConstIdx(const Extract* ext) {
+    std::optional<nat_t> getConstIdx(const Extract* ext) const {
         auto a = Lit::isa(ext->index());
         auto i = ext->tuple()->num_tprojs();
 
@@ -282,7 +280,7 @@ private: // helpers
     /// check if extract is already covered by any other extract in the state of var
     bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) { return getCovering(ext, map).has_value(); }
 
-    const Var* getVarOfExt(const Extract* ext) {
+    const Var* getVarOfExt(const Extract* ext) const {
         const Def* tmp = ext->tuple();
         while (auto t = tmp->isa<Extract>())
             tmp = t->tuple();
