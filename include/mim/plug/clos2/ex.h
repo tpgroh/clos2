@@ -12,12 +12,9 @@
 
 namespace mim::plug::clos2 {
 
-// TODO: I chose bitmaps because I thought that I would perform many unions of EXAnalysis
-// currently this is not the case. So maybe I have to rethink the data structure EXState.
-
 /// stores the extractions of a def by keeping track of all indices which are extracted
 struct EXState {
-    // TODO: use std::vector<u32> to speed up union
+    // TODO: use std::vector<u32> to speed up union and popcount
 
     u16 count                 = 0;  ///< the count of set bits
     bool allSet               = 0;  ///< is all set
@@ -91,48 +88,6 @@ private:
 public:
     /// create extraction analysis for def
     EXAnalysis(const Def* def) { include(def); }
-
-    bool include(const EXAnalysis& other) {
-        auto& ostate = getState(other);
-
-        bool anychange = false;
-
-        // iterate over all entries of others state
-        for (const auto& [var, map] : ostate)
-            for (const auto& [tuple, exstate] : map) {
-                if (tuple->isa<Var>()) {
-                    bool change = state_[var][tuple].unify(exstate);
-
-                    // maybe we just added the last missing extraction.
-                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
-                        std::cout << "collected all extractions of var " << tuple << "\n";
-                        state_[var][tuple].setAll();
-                    }
-                    anychange |= change;
-                } else {
-                    // if tuple is already covered then tuple#exstate is also covered
-                    auto ext = tuple->isa<Extract>();
-                    assert(ext); // TODO: is there some other possible case?
-                    if (isExtCovered(ext, state_[var])) continue;
-
-                    // tuple is not covered so tuple#exstate can be added to the state
-                    bool change = state_[var][tuple].unify(exstate);
-
-                    // maybe we just included all or collected the last missing extractions so peal one off
-                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
-                        std::cout << "peal of from " << ext << "\n";
-                        auto it = state_[var].find(tuple);
-                        assert(it != state_[var].end());
-                        state_[var].erase(it);
-                        include(tuple);
-                    }
-                    anychange |= change;
-                }
-            }
-
-        // return if something changed
-        return anychange;
-    }
 
     void include(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
