@@ -24,28 +24,45 @@ namespace mim::plug::clos2 {
 class FVAnalysis {
 public:
     DefSet free_vars(const Def* def) {
-        auto fex = free_extr(def);
-        return fex.getSet();
+        if (auto mut = def->isa_mut()) return free_vars(mut);
+
+        // run pre pass
+        EXAnalysis exs{def};
+        return free_vars(def, exs);
     }
 
-private:
     /// calculate the set of free variables
-    EXAnalysis free_extr(const Def* def) {
-        if (auto mut = def->isa_mut()) return free_extr(mut);
+    DefSet free_vars(const Def* def, EXAnalysis& exs) {
+        if (auto mut = def->isa_mut()) return free_vars(mut);
 
         /* NOTE:
          * the expression is immutable. Thus it doesn't introduce new vars.
          * this means that the free vars are the union of all vars reachable.
          * thus the union of the localvars of all reachable mutables.
          */
-        auto fex = local_vars(def);
+        auto fvs = local_vars(def);
         for (auto mut : def->local_muts())
-            fex.include(free_extr(mut));
+            for (auto d : free_vars(mut, exs)) {
+                auto cov = exs.getCovering(d);
+                assert(cov);
+                fvs.insert(*cov);
+            }
 
-        return fex;
+        return fvs;
     }
 
-    EXAnalysis free_extr(Def* def) {
+    DefSet free_vars(Def* def) {
+        auto& st = get_state(def);
+
+        if (st.mark_ == 0) {
+            EXAnalysis exs{def};
+            return free_vars(def, exs);
+        }
+
+        return st.vars_;
+    }
+
+    DefSet free_vars(Def* def, EXAnalysis& exs) {
         auto& st = get_state(def);
         auto& w  = def->world();
 
@@ -53,21 +70,24 @@ private:
             bool cyclic = false;
             /* first we need to do the initial run */
             w.next_run();
-            free_extr<true>(cyclic, w.next_run(), def);
+            free_vars<true>(cyclic, w.next_run(), def, exs);
 
-            /* now we can iterate to solve for the fixed-point */
+            // TODO: because I'm now using the local_muts() from Def I don't think that I need this fixedpoint solving
+            // algo anymore.
+
+            // now we can iterate to solve for the fixed-point
             for (bool todo = cyclic; todo;) {
                 todo = false;
-                free_extr<false>(todo, w.next_run(), def);
+                free_vars<false>(todo, w.next_run(), def, exs);
             }
         }
 
-        /* the free var set is stored in the state */
+        // the free var set is stored in the state
         return st.vars_;
     }
 
     template<bool init>
-    EXAnalysis free_extr(bool& todo, uint32_t run, Def* expr) {
+    DefSet free_vars(bool& todo, uint32_t run, Def* expr, EXAnalysis& exs) {
         /* NOTE: for an explanation on the algorithm behind this take a look at Def::free_vars */
 
         auto& st = get_state(expr);
@@ -78,23 +98,41 @@ private:
 
         st.mark_ = run;
 
-        auto fex0 = st.vars_.getSet(); // create copy to check against later, see if the set changed
-        auto fvs  = st.vars_;
+        auto fvs0 = st.vars_; // create copy to check against later, see if the set changed
+        auto fvs  = fvs0;
 
         for (auto op : expr->deps()) {
             /* we start by adding all from dependencies reachable vars */
-            if constexpr (init) fvs.include(local_vars(op));
+            if constexpr (init)
+                for (auto d : local_vars(op)) {
+                    auto c = exs.getCovering(d);
+                    assert(c.has_value());
+                    fvs.insert(*c);
+                }
 
             /* then add the free vars of every from op reachable mutable */
-            for (auto mut : op->local_muts())
-                fvs.include(free_extr<init>(todo, run, mut));
+            for (auto mut : op->local_muts()) {
+                exs.include(mut);
+                for (auto v : free_vars<init>(todo, run, mut, exs)) {
+                    auto c = exs.getCovering(v);
+                    assert(c);
+                    fvs.insert(*c);
+                }
+            }
         }
 
+        // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
+        // this way we can just drop var without another search for extractions of it
+        if (auto var = expr->has_var()) exs.include(var);
+
+        // minimize fvs (there might be entries which are covered by another extraction in exs)
+        fvs = exs.getCovering(fvs);
+
         // FV(lam x.e) = FV(e) \ {x}
-        if (auto var = expr->has_var()) fvs.drop(var);
+        if (auto var = expr->has_var()) fvs.erase(var);
 
         /* did smt change? */
-        if constexpr (!init) todo |= fex0 != fvs.getSet();
+        if constexpr (!init) todo |= fvs0 != fvs;
 
         /* update free var cache of expr */
         return st.vars_ = fvs;
@@ -102,8 +140,8 @@ private:
 
 private:
     struct FVState {
-        u32 mark_        = 0;
-        EXAnalysis vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
+        u32 mark_    = 0;
+        DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
     };
 
     GIDNodeMap<const Def*, FVState> state_;
@@ -115,13 +153,22 @@ private:
         // create new state empty state for def
         auto& st = state_[def]; // default initializes the state
 
-        st.vars_.includeFromDef(def);
+        // TODO: init free vars
+
+        if (def->isa<Var>())
+            st.vars_.insert(def);
+        else if (def->isa<Extract>())
+            st.vars_.insert(def);
+        else
+            for (auto dep : def->deps())
+                for (auto v : local_vars(dep))
+                    st.vars_.insert(v);
 
         return st;
     }
 
     /// Var%s reachable by following *immutable* deps().
-    EXAnalysis local_vars(const Def* expr) { return expr->is_mutable() ? EXAnalysis{} : get_state(expr).vars_; }
+    DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet{} : get_state(expr).vars_; }
 };
 
 } // namespace mim::plug::clos2

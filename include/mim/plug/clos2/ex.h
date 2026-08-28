@@ -12,25 +12,8 @@
 
 namespace mim::plug::clos2 {
 
-// TODO: I wanted to use the bitmap to speed up the union of results.
-// maybe now with std::vector<bool> this is to slow to justyfy not just using a tree
-// with a tree I could also fairly easy drop covored extractions from the state
-// TODO: If the vector is to slow I could write my own dynamic bitmap which uses a vector of u64 bitmaps this way I
-// loose the 64 while keeping the speed in union restriction
-
-/// I want to use the result of this to get the free vars of a def
-///
-/// for a immutable def this means that I run this on every def of local_muts() and take the union of the results.
-/// that is then the result for def.
-///
-/// from this I already get
-/// TODO: I need a union function to combine the results
-/// TODO: I need a function to retrieve the set of free vars
-///
-/// for mutable def I also need the union function
-/// TODO: and a function to remove the extractions of a Var.
-///
-///
+// TODO: I chose bitmaps because I thought that I would perform many unions of EXAnalysis
+// currently this is not the case. So maybe I have to rethink the data structure EXState.
 
 /// stores the extractions of a def by keeping track of all indices which are extracted
 struct EXState {
@@ -39,7 +22,7 @@ struct EXState {
     u16 count                 = 0;  ///< the count of set bits
     std::vector<bool> idx_map = {}; ///< dynamic index bit map
 
-    /// set all idx to true
+    /// set all indices to true
     bool setAll() {
         if (idx_map.size() == 0) return false;
 
@@ -59,7 +42,6 @@ struct EXState {
         return true;
     }
 
-    // TODO: for union I'll need a function that or's two idx_map's
     bool unify(const EXState& other) {
         if (isAllSet()) return false;
         if (other.isAllSet()) return setAll(), true;
@@ -87,6 +69,17 @@ struct EXState {
         return idx_map[idx];
     }
 
+    std::optional<const Def*> get(const Def* tuple, std::optional<nat_t> idx) const {
+        if (idx) {
+            if (isIdxSet(*idx)) return tuple->world().extract(tuple, *idx);
+            return {};
+        } else {
+            if (isAllSet()) return tuple;
+            return {};
+        }
+    }
+
+    // TODO: remove
     void createExtractions(const Def* tuple, DefSet& set) const {
         if (isAllSet()) {
             set.insert(tuple);
@@ -98,12 +91,15 @@ struct EXState {
     }
 };
 
-/// Analyse the extractions which are beeing made inside a Def
+/// Analyse the extractions which are being made inside a Def
 class EXAnalysis {
 private:
     friend auto& getState(const EXAnalysis& other) { return other.state_; }
 
 public:
+    /// create extraction analysis for def
+    EXAnalysis(const Def* def) { include(def); }
+
     /// get the set of extraction from the state
     DefSet getSet() const {
         DefSet set{};
@@ -148,7 +144,7 @@ public:
                         auto it = state_[var].find(tuple);
                         assert(it != state_[var].end());
                         state_[var].erase(it);
-                        includeFromDef(tuple);
+                        include(tuple);
                     }
                     anychange |= change;
                 }
@@ -158,7 +154,7 @@ public:
         return anychange;
     }
 
-    void includeFromDef(const Def* def) {
+    void include(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
         if (auto var = def->isa<Var>()) {
             // clear extractions
@@ -210,17 +206,64 @@ public:
                     if (it != map.end()) map.erase(it);
 
                     // mark every extraction of ext->tuple() as reachable by using t-recursion
-                    return includeFromDef(ext->tuple());
+                    return include(ext->tuple());
                 }
             }
         }
 
         // def was not an Extract so we collect all extractions from it's deps()
         else
-            // TODO: it could be that I dont want to do this or at least that I dont want to include the type. I have to
-            // check later
+            // TODO: it could be that I always want to include the type because of some special cases for def but I'm
+            // not sure
             for (auto dep : def->deps())
-                includeFromDef(dep);
+                include(dep);
+    }
+
+    /// get highest covered extraction from def
+    std::optional<const Def*> getCovering(const Def* def) {
+        if (auto var = def->isa<Var>()) {
+            if (state_.contains(var)) return def;
+            return {};
+        }
+
+        else if (auto ext = def->isa<Extract>()) {
+            auto var = getVarOfExt(ext);
+            if (!state_.contains(var)) return {};
+            auto map = state_[var];
+            return getCovering(ext, map);
+        }
+
+        return {};
+    }
+
+    std::optional<const Def*> getCovering(const Extract* ext, const DefMap<EXState>& map) {
+        auto idx = getConstIdx(ext);
+
+        // if the tuple is a var we just have to check if it is already in the map
+        if (auto v = ext->tuple()->isa<Var>()) {
+            if (!map.contains(v)) return {};
+            return map.at(v).get(ext->tuple(), idx);
+        }
+
+        if (!idx || !map.contains(ext->tuple())) {
+            ext = ext->tuple()->isa<Extract>(); // we expect an extract because the tuple() is not a Var
+            assert(ext);                        // TODO: could there be anything else?
+            return getCovering(ext, map);       // use t-recursion
+        }
+
+        return map.at(ext->tuple()).get(ext->tuple(), idx);
+    }
+
+    DefSet getCovering(const DefSet& old) {
+        DefSet set;
+
+        for (auto d : old) {
+            auto c = getCovering(d);
+            assert(c);
+            set.insert(*c);
+        }
+
+        return set;
     }
 
 private: // helpers
@@ -237,23 +280,7 @@ private: // helpers
     }
 
     /// check if extract is already covered by any other extract in the state of var
-    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) {
-        auto idx = getConstIdx(ext);
-
-        // if the tuple is a var we just have to check if it is already in the map
-        if (auto v = ext->tuple()->isa<Var>()) {
-            if (!map.contains(v)) return false;
-            return (idx) ? map.at(v).isIdxSet(*idx) : map.at(v).isAllSet();
-        }
-
-        if (!idx || !map.contains(ext->tuple())) {
-            ext = ext->tuple()->isa<Extract>(); // we expect an extract because the tuple() is not a Var
-            assert(ext);                        // TODO: could there be anything else?
-            return isExtCovered(ext, map);      // use t-recursion
-        }
-
-        return map.at(ext->tuple()).isIdxSet(*idx);
-    }
+    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) { return getCovering(ext, map).has_value(); }
 
     const Var* getVarOfExt(const Extract* ext) {
         const Def* tmp = ext->tuple();

@@ -14,6 +14,7 @@ using namespace mim::plug;
 void foo(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
     if (!done.emplace(def).second) return;
 
+    std::cout << "foo " << def << std::endl;
     auto fv = ana.free_vars(def);
 
     // print free vars
@@ -27,6 +28,48 @@ void foo(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
 }
 
 TEST(internal, fv) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto outer = w.mut_lam({w.type_i32(), w.arr(4, w.type_i32())}, w.type_i32())->set("outer");
+    outer->var()->set("argsOuter");
+    auto [a, b] = outer->vars<2>();
+    a->set("a");
+    b->set("b");
+    auto c = b->proj(4, 3)->set("c");
+
+    auto inner = w.mut_lam(w.type_i32(), w.type_i32())->set("inner");
+    auto x     = inner->var()->set("x");
+
+    inner->set(false, w.call(core::wrap::add, core::Mode::none, Defs{c, x}));
+
+    outer->set(false, w.app(inner, w.lit_i32(1)));
+
+    outer->dot("tmp.dot");
+
+    // for debugging and showcasing I first calculate and printout the results for every def
+    auto ana  = clos2::FVAnalysis{};
+    auto done = DefSet{};
+    foo(outer, done, ana);
+
+    // free vars of inner should be {c}
+    auto fv = ana.free_vars(inner);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(c));
+
+    // free vars of outer should be {}
+    fv = ana.free_vars(outer);
+    ASSERT_EQ(fv.size(), 0);
+
+    // free vars of a should be {a}
+    fv = ana.free_vars(a);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(a));
+}
+
+/*
+TEST(internal, extracts) {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -46,24 +89,14 @@ TEST(internal, fv) {
 
     // TOOD I should make sure that I've contructed what I wanted
 
-    outer->dot("tmp.dot");
+    outer->dot("internal-extracts.dot");
 
     // for debugging and showcasing I first calcualte and printout the results for every def
-    auto ana  = clos2::FVAnalysis{};
-    auto done = DefSet{};
-    foo(outer, done, ana);
+    std::cout << "performing analysis" << std::endl;
+    auto ana = clos2::EXAnalysis{inner};
 
-    // free vars of inner should be {a}
-    auto fv = ana.free_vars(inner);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(a));
+    ana.printState();
 
-    // free vars of outer should be {}
-    fv = ana.free_vars(outer);
-    ASSERT_EQ(fv.size(), 0);
-
-    // free vars of a should be {a}
-    fv = ana.free_vars(a);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(a));
+    ASSERT_TRUE(true); // TODO: write test asserts
 }
+*/
