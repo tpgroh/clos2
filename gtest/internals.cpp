@@ -12,6 +12,7 @@
 using namespace mim;
 using namespace mim::plug;
 
+// TODO: remove this
 void print(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
     if (!done.emplace(def).second) return;
 
@@ -28,31 +29,12 @@ void print(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
         print(dep, done, ana);
 }
 
+// TODO: remove this
 void print(const Def* def) {
     DefSet done{};
     clos2::FVAnalysis ana{};
 
     print(def, done, ana);
-}
-
-Lam* build_poly_id(World& w) {
-    // construct type
-    auto pi = w.mut_pi(w.type<1>(), true)->set_dom(w.type());
-    auto pT = pi->var()->set("T");
-    pi->set_codom(w.pi(pT, pT));
-
-    // construct lambda
-    auto lamT = w.mut_lam(pi);
-    auto lT   = lamT->var()->set("T");
-
-    auto lamx = w.mut_lam(w.pi(lT, lT));
-    auto x    = lamx->var()->set("x");
-
-    // NOTE: I set the filter to false because I don't want this to just be partially evaluated while constructing
-    lamx->set(false, x);
-    lamT->set(false, lamx);
-
-    return lamT;
 }
 
 // a simple to test the very basics
@@ -205,6 +187,27 @@ TEST(internal_fv, threshold2) {
     clos2::FVAnalysis ana;
     auto fvs = ana.free_vars(foo->body());
 
+    ASSERT_EQ(fvs.size(), 1);
+    ASSERT_TRUE(fvs.contains(foo->var()));
+}
+
+TEST(internal_fv, extract_from_lam) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto foo   = w.mut_lam(w.type_i32(), w.type_i32());
+    auto v     = foo->var();
+    auto inner = w.mut_lam(w.type_i32(), w.arr(2, w.type_i32()));
+    inner->set(false, w.tuple({v, v}));
+    auto bar = w.app(inner, w.lit_i32(1));
+    foo->set(false, bar->proj(1));
+
+    clos2::FVAnalysis ana;
+    auto fvs = ana.free_vars(foo);
+    ASSERT_EQ(fvs.size(), 0);
+
+    fvs = ana.free_vars(foo->body());
     ASSERT_EQ(fvs.size(), 1);
     ASSERT_TRUE(fvs.contains(foo->var()));
 }
