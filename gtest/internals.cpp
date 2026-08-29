@@ -167,3 +167,44 @@ TEST(internal_fv, trans_peel_off) {
     ASSERT_EQ(fv.size(), 1);
     ASSERT_TRUE(fv.contains(foo->var(2, 1)));
 }
+
+// tests that it doesn't unpeal if it is not extracting directly from a Var with an arity higher or equal to the
+// scalarize_threshold
+TEST(internal_fv, threshold1) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto foo = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
+    auto v1  = foo->var(0)->proj(0);
+    auto v2  = foo->var(1)->proj(0);
+    auto b   = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
+    for (size_t i = 2; i < w.flags().scalarize_threshold; i++) {
+        v1 = b;
+        v2 = foo->var(i)->proj(0);
+        b  = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
+    }
+    foo->set(false, b);
+
+    clos2::FVAnalysis ana;
+    auto fvs = ana.free_vars(foo->body());
+    ASSERT_EQ(fvs.size(), w.flags().scalarize_threshold);
+    for (size_t i = 0; i < w.flags().scalarize_threshold; i++)
+        ASSERT_TRUE(fvs.contains(foo->var(i)->proj(0)));
+}
+
+// tests if it unpeels if extracting from a var which has an arity higher or equal to the scalarize_threshold
+TEST(internal_fv, threshold2) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+    auto foo      = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
+    auto [v1, v2] = foo->var(7)->projs<2>();
+    foo->set(false, w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2}));
+
+    clos2::FVAnalysis ana;
+    auto fvs = ana.free_vars(foo->body());
+
+    ASSERT_EQ(fvs.size(), 1);
+    ASSERT_TRUE(fvs.contains(foo->var()));
+}

@@ -15,7 +15,7 @@ namespace mim::plug::clos2 {
 class EXAnalysis {
 private:
     struct EXState {
-        static constexpr nat_t width = 32;
+        static constexpr nat_t width = 32; ///< the width increment of bitmaps
 
         u16 count                               = 0;  ///< the count of set bits
         std::vector<std::bitset<width>> idx_map = {}; ///< dynamic index bit map
