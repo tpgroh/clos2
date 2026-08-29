@@ -7,6 +7,7 @@
 #include "mim/ast/ast.h"
 
 #include "mim/plug/clos2/fv.h"
+#include "mim/plug/core/autogen.h"
 
 using namespace mim;
 using namespace mim::plug;
@@ -54,6 +55,7 @@ Lam* build_poly_id(World& w) {
     return lamT;
 }
 
+// a simple to test the very basics
 TEST(internal_fv, simple) {
     Driver driver;
     auto& w = driver.world();
@@ -88,26 +90,19 @@ TEST(internal_fv, simple) {
     ASSERT_TRUE(fv.contains(c));
 }
 
+// simple test to check if the extractions of a var will be unpeeled into including the var if the union of free vars
+// included all extractions of it
 TEST(internal_fv, simple_peel_off) {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
 
-    // lam foo (a,b,c,d : I32) : I32 = bar a
-    // where lam bar (x:I32) = core::wrap::add core::Mode::none x c
-    auto foo    = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32())->set("foo");
+    auto foo    = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
     auto [a, b] = foo->vars<2>();
-    a->set("a");
-    b->set("b");
-    foo->var()->set("foovar");
-    auto bar = w.mut_lam(w.type_i32(), w.type_i32())->set("bar");
-    auto x   = bar->var()->set("x");
+    auto bar    = w.mut_lam(w.type_i32(), w.type_i32());
+    auto x      = bar->var();
     bar->set(false, w.call(core::wrap::add, core::Mode::none, Defs{x, b}));
     foo->set(false, w.app(bar, a));
-    foo->body()->set("foobody");
-    bar->body()->set("barbody");
-
-    print(foo);
 
     clos2::FVAnalysis ana{};
 
@@ -126,4 +121,49 @@ TEST(internal_fv, simple_peel_off) {
     ASSERT_EQ(fv.size(), 2);
     ASSERT_TRUE(fv.contains(x));
     ASSERT_TRUE(fv.contains(b));
+}
+
+// test if dangling extractions get removed correctly
+TEST(internal_fv, trans_peel_off) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto foo    = w.mut_lam({w.type_bool(), w.arr(2, w.arr(2, w.type_i32()))}, w.type_i32());
+    auto [a, b] = foo->var(2, 1)->projs<2>();
+    auto [u, v] = a->projs<2>();
+    auto [x, y] = b->projs<2>();
+
+    auto sum2 = w.mut_lam({w.type_i32(), w.type_i32()}, w.type_i32());
+    {
+        auto [x, y] = sum2->vars<2>();
+        sum2->set(false, w.call(core::wrap::add, core::Mode::none, Defs{x, y}));
+    }
+
+    auto sum3 = w.mut_lam(w.arr(3, w.type_i32()), w.type_i32());
+    {
+        auto [x, y, z] = sum3->vars<3>();
+        sum3->set(false, w.app(sum2, {w.app(sum2, {x, y}), z}));
+    }
+
+    auto f1 = w.app(sum3, {x, u, y}); // FV is {b,u}
+    auto f2 = w.app(sum2, {u, v});    // FV is {a}
+    auto f3 = w.app(sum2, {f1, f2});  // FV is {foo->var(2,1)} I dont want u to be included!
+
+    foo->set(false, f3);
+
+    clos2::FVAnalysis ana{};
+
+    auto fv = ana.free_vars(f1);
+    ASSERT_EQ(fv.size(), 2);
+    ASSERT_TRUE(fv.contains(b));
+    ASSERT_TRUE(fv.contains(u));
+
+    fv = ana.free_vars(f2);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(a));
+
+    fv = ana.free_vars(f3);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(foo->var(2, 1)));
 }
