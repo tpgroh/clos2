@@ -15,35 +15,43 @@ namespace mim::plug::clos2 {
 class EXAnalysis {
 private:
     struct EXState {
-        u16 count                 = 0;  ///< the count of set bits
-        std::vector<bool> idx_map = {}; ///< dynamic index bit map
+        static constexpr nat_t width = 32;
+
+        u16 count                               = 0;  ///< the count of set bits
+        std::vector<std::bitset<width>> idx_map = {}; ///< dynamic index bit map
 
         /// set an index and return whether it was not set before
         bool setIdx(nat_t idx) {
             if (isIdxSet(idx)) return false;
 
-            if (idx_map.size() <= idx) idx_map.resize(idx + 1);
-            idx_map[idx] = true;
+            auto i = idx / width;
+            if (idx_map.size() <= i) idx_map.resize(i + 1);
+            idx_map[i][idx % width] = true;
             count++;
             return true;
         }
 
         /// check if an index is already set
         bool isIdxSet(nat_t idx) const {
-            if (idx_map.size() <= idx) return false;
-            return idx_map[idx];
+            auto i = idx / width;
+            if (idx_map.size() <= i) return false;
+            return idx_map[i][idx % width];
         }
 
         /// unify with other state
         bool unify(const EXState& other) {
-            // TODO: using bitsets this can be much faster
             if (idx_map.size() < other.idx_map.size()) idx_map.resize(other.idx_map.size());
 
+            // or on bitmaps for union
             for (size_t i = 0; i < other.idx_map.size(); i++)
-                idx_map[i] = idx_map[i] || other.idx_map[i];
+                idx_map[i] |= other.idx_map[i];
 
+            // recount set bits.
             auto old_count = count;
-            count          = std::ranges::count(idx_map, true);
+            count          = 0;
+            for (size_t i = 0; i < idx_map.size(); i++)
+                count += idx_map[i].count();
+
             return old_count != count;
         }
 
