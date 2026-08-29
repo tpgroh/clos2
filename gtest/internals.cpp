@@ -11,7 +11,7 @@
 using namespace mim;
 using namespace mim::plug;
 
-void foo(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
+void print(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
     if (!done.emplace(def).second) return;
 
     std::cout << "foo " << def << std::endl;
@@ -24,79 +24,101 @@ void foo(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
     std::cout << "}\n" << def->free_vars() << "\n\n";
 
     for (auto dep : def->deps())
-        foo(dep, done, ana);
+        print(dep, done, ana);
 }
 
-TEST(internal, fv) {
+void print(const Def* def) {
+    DefSet done{};
+    clos2::FVAnalysis ana{};
+
+    print(def, done, ana);
+}
+
+Lam* build_poly_id(World& w) {
+    // construct type
+    auto pi = w.mut_pi(w.type<1>(), true)->set_dom(w.type());
+    auto pT = pi->var()->set("T");
+    pi->set_codom(w.pi(pT, pT));
+
+    // construct lambda
+    auto lamT = w.mut_lam(pi);
+    auto lT   = lamT->var()->set("T");
+
+    auto lamx = w.mut_lam(w.pi(lT, lT));
+    auto x    = lamx->var()->set("x");
+
+    // NOTE: I set the filter to false because I don't want this to just be partially evaluated while constructing
+    lamx->set(false, x);
+    lamT->set(false, lamx);
+
+    return lamT;
+}
+
+TEST(internal_fv, simple) {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
 
-    auto outer = w.mut_lam({w.type_i32(), w.arr(4, w.type_i32())}, w.type_i32())->set("outer");
-    outer->var()->set("argsOuter");
-    auto [a, b] = outer->vars<2>();
-    a->set("a");
-    b->set("b");
-    auto c = b->proj(4, 3)->set("c");
+    // lam foo (a,b,c,d : I32) : I32 = bar a
+    // where lam bar (x:I32) = core::wrap::add core::Mode::none x c
+    auto foo          = w.mut_lam(w.arr(4, w.type_i32()), w.type_i32());
+    auto [a, b, c, d] = foo->vars<4>();
+    auto bar          = w.mut_lam(w.type_i32(), w.type_i32());
+    auto x            = bar->var();
+    bar->set(false, w.call(core::wrap::add, core::Mode::none, Defs{x, c}));
+    foo->set(false, w.app(bar, a));
 
-    auto inner = w.mut_lam(w.type_i32(), w.type_i32())->set("inner");
-    auto x     = inner->var()->set("x");
+    clos2::FVAnalysis ana{};
 
-    inner->set(false, w.call(core::wrap::add, core::Mode::none, Defs{c, x}));
+    auto fv = ana.free_vars(foo->body());
+    ASSERT_EQ(fv.size(), 2);
+    ASSERT_TRUE(fv.contains(a));
+    ASSERT_TRUE(fv.contains(c));
 
-    outer->set(false, w.app(inner, w.lit_i32(1)));
+    fv = ana.free_vars(foo);
+    ASSERT_EQ(fv.size(), 0);
 
-    outer->dot("tmp.dot");
-
-    // for debugging and showcasing I first calculate and printout the results for every def
-    auto ana  = clos2::FVAnalysis{};
-    auto done = DefSet{};
-    foo(outer, done, ana);
-
-    // free vars of inner should be {c}
-    auto fv = ana.free_vars(inner);
+    fv = ana.free_vars(bar);
     ASSERT_EQ(fv.size(), 1);
     ASSERT_TRUE(fv.contains(c));
 
-    // free vars of outer should be {}
-    fv = ana.free_vars(outer);
-    ASSERT_EQ(fv.size(), 0);
-
-    // free vars of a should be {a}
-    fv = ana.free_vars(a);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(a));
+    fv = ana.free_vars(bar->body());
+    ASSERT_EQ(fv.size(), 2);
+    ASSERT_TRUE(fv.contains(x));
+    ASSERT_TRUE(fv.contains(c));
 }
 
-/*
-TEST(internal, extracts) {
+TEST(internal_fv, simple_peel_off) {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
 
-    auto outer = w.mut_lam({w.type_i32(), w.type_i32()}, w.type_i32())->set("outer");
-    outer->var()->set("argsOuter");
-    auto [a, b] = outer->vars<2>();
-    a->set("a");
-    b->set("b");
+    // lam foo (a,b,c,d : I32) : I32 = bar a
+    // where lam bar (x:I32) = core::wrap::add core::Mode::none x c
+    auto foo    = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
+    auto [a, b] = foo->vars<2>();
+    auto bar    = w.mut_lam(w.type_i32(), w.type_i32());
+    auto x      = bar->var();
+    bar->set(false, w.call(core::wrap::add, core::Mode::none, Defs{x, b}));
+    foo->set(false, w.app(bar, a));
 
-    auto inner = w.mut_lam(w.type_i32(), w.type_i32())->set("inner");
-    auto x     = inner->var()->set("x");
+    clos2::FVAnalysis ana{};
 
-    inner->set(false, w.call(core::wrap::add, core::Mode::none, Defs{a, x}));
+    print(foo);
 
-    outer->set(false, w.app(inner, w.lit_i32(1)));
+    auto fv = ana.free_vars(foo->body());
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(foo->var()));
 
-    // TOOD I should make sure that I've contructed what I wanted
+    fv = ana.free_vars(foo);
+    ASSERT_EQ(fv.size(), 0);
 
-    outer->dot("internal-extracts.dot");
+    fv = ana.free_vars(bar);
+    ASSERT_EQ(fv.size(), 1);
+    ASSERT_TRUE(fv.contains(b));
 
-    // for debugging and showcasing I first calcualte and printout the results for every def
-    std::cout << "performing analysis" << std::endl;
-    auto ana = clos2::EXAnalysis{inner};
-
-    ana.printState();
-
-    ASSERT_TRUE(true); // TODO: write test asserts
+    fv = ana.free_vars(bar->body());
+    ASSERT_EQ(fv.size(), 2);
+    ASSERT_TRUE(fv.contains(x));
+    ASSERT_TRUE(fv.contains(b));
 }
-*/
