@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "mim/def.h"
 #include "mim/tuple.h"
 #include "mim/world.h"
@@ -178,29 +180,34 @@ public:
             auto var = getVarOfExt(ext);
             if (!state_.contains(var)) return {};
             auto map = state_.at(var);
-            return getCovering(ext, map);
+            return getCovering(ext, map, {});
         }
 
         return {};
     }
 
-    std::optional<const Def*> getCovering(const Extract* ext, const DefMap<EXState>& map) const {
+    std::optional<const Def*>
+    getCovering(const Extract* ext, const DefMap<EXState>& map, std::optional<const Def*> prev) const {
         auto idx = getConstIdx(ext);
 
         // if the tuple is a var we just have to check if it is already in the map
         if (auto v = ext->tuple()->isa<Var>()) {
-            if (!map.contains(v)) return {};
+            if (!map.contains(v)) return prev;
             if (map.at(v).isAllSet()) return ext->tuple();
-            return map.at(v).get(ext->tuple(), idx);
+            auto found = map.at(v).get(ext->tuple(), idx);
+            if (!found) return prev;
+            return found;
         }
 
-        if (!idx || !map.contains(ext->tuple())) {
-            ext = ext->tuple()->isa<Extract>(); // we expect an extract because the tuple() is not a Var
-            assert(ext);                        // TODO: could there be anything else?
-            return getCovering(ext, map);       // use t-recursion
-        }
+        auto tuple = ext->tuple()->isa<Extract>();
+        assert(tuple); // TODO: could there be anything else?
+        if (!idx || !map.contains(ext->tuple()))
+            return getCovering(tuple, map, prev); // use t-recursion to find covering
 
-        return map.at(ext->tuple()).get(ext->tuple(), idx);
+        // found a covering now use t recursion to return the highest covering.
+        auto found = map.at(ext->tuple()).get(ext->tuple(), idx);
+        if (!found) return prev;
+        return getCovering(tuple, map, found);
     }
 
     /// create the smallest Covering of a DefSet
@@ -240,7 +247,7 @@ private: // helpers
     }
 
     /// check if extract is already covered by any other extract in the state of var
-    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) { return getCovering(ext, map).has_value(); }
+    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) { return getCovering(ext, map, {}).has_value(); }
 
     const Var* getVarOfExt(const Extract* ext) const {
         const Def* tmp = ext->tuple();
