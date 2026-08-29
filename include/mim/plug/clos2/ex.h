@@ -175,7 +175,8 @@ public:
                 include(dep);
     }
 
-    /// get highest covered extraction from def
+    /// get covered extraction from def
+    template<bool fast = false>
     std::optional<const Def*> getCovering(const Def* def) const {
         if (auto var = def->isa<Var>()) {
             if (!state_.contains(var)) return {};
@@ -188,12 +189,14 @@ public:
             auto var = getVarOfExt(ext);
             if (!state_.contains(var)) return {};
             auto map = state_.at(var);
-            return getCovering(ext, map, {});
+            return getCovering<fast>(ext, map, {});
         }
 
         return {};
     }
 
+    /// get covering of extraction if in state
+    template<bool fast = false>
     std::optional<const Def*>
     getCovering(const Extract* ext, const DefMap<EXState>& map, std::optional<const Def*> prev) const {
         auto idx = getConstIdx(ext);
@@ -210,20 +213,24 @@ public:
         auto tuple = ext->tuple()->isa<Extract>();
         assert(tuple); // TODO: could there be anything else?
         if (!idx || !map.contains(ext->tuple()))
-            return getCovering(tuple, map, prev); // use t-recursion to find covering
+            return getCovering<fast>(tuple, map, prev); // use t-recursion to find covering
 
         // found a covering now use t recursion to return the highest covering.
         auto found = map.at(ext->tuple()).get(ext->tuple(), idx);
-        if (!found) return prev;
-        return getCovering(tuple, map, found);
+        if constexpr (!fast) {
+            if (!found) return prev;
+            return getCovering<fast>(tuple, map, found);
+        } else
+            return found;
     }
 
     /// create the smallest Covering of a DefSet
+    template<bool fast = false>
     DefSet getCovering(const DefSet& old) const {
         DefSet set;
 
         for (auto d : old) {
-            auto c = getCovering(d);
+            auto c = getCovering<fast>(d);
             assert(c);
             set.insert(*c);
         }
@@ -255,7 +262,9 @@ private: // helpers
     }
 
     /// check if extract is already covered by any other extract in the state of var
-    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) { return getCovering(ext, map, {}).has_value(); }
+    bool isExtCovered(const Extract* ext, const DefMap<EXState>& map) {
+        return getCovering<true>(ext, map, {}).has_value();
+    }
 
     const Var* getVarOfExt(const Extract* ext) const {
         const Def* tmp = ext->tuple();

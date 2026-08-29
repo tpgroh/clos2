@@ -168,7 +168,7 @@ TEST(internal_fv, trans_peel_off) {
     ASSERT_TRUE(fv.contains(foo->var(2, 1)));
 }
 
-// tests that it doesn't unpeal if it is not extracting directly from a Var with an arity higher or equal to the
+// tests that it doesn't unpeel if it is not extracting directly from a Var with an arity higher or equal to the
 // scalarize_threshold
 TEST(internal_fv, threshold1) {
     Driver driver;
