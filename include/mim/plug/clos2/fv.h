@@ -22,7 +22,7 @@ public:
 
     /// calculate the set of free variables
     DefSet free_vars(const Def* def, EXAnalysis& exs) {
-        if (auto mut = def->isa_mut()) return free_vars(mut);
+        if (auto mut = def->isa_mut()) return free_vars(mut, exs);
 
         /* NOTE:
          * the expression is immutable. Thus it doesn't introduce new vars.
@@ -30,12 +30,14 @@ public:
          * thus the union of the localvars of all reachable mutables.
          */
         auto fvs = local_vars(def);
-        for (auto mut : def->local_muts())
-            for (auto d : free_vars(mut, exs)) {
-                auto cov = exs.getCovering(d);
-                assert(cov);
-                fvs.insert(*cov);
-            }
+        for (auto mut : def->local_muts()) {
+            EXAnalysis exs2{mut};
+            auto fvs2 = free_vars(mut, exs2);
+            exs.include(exs2);
+
+            for (auto v : exs.getCovering(fvs2))
+                fvs.insert(v);
+        }
 
         return exs.getCovering(fvs);
     }
@@ -57,24 +59,24 @@ public:
         if (!st.mark_) {
             // enforce local_muts to be calculated
             // TODO: can I assume that this is already the case?
+            // Im using this to make sure that local_muts is correct
             def->free_vars();
 
             for (auto op : def->deps()) {
                 // include all local_vars reachable
-                for (auto d : local_vars(op)) {
-                    auto c = exs.getCovering(d);
-                    assert(c);
-                    st.vars_.insert(*c);
-                }
+                for (auto d : exs.getCovering(local_vars(op)))
+                    st.vars_.insert(d);
 
                 // and add the free vars of every from op reachable mutable
                 for (auto mut : op->local_muts()) {
-                    exs.include(mut);
-                    for (auto v : free_vars(mut, exs)) {
-                        auto c = exs.getCovering(v);
-                        assert(c);
-                        st.vars_.insert(*c);
-                    }
+                    // I don't want to polute the extraction set of mut so I create a new one which I then include in
+                    // the current one
+                    EXAnalysis exs2{mut};
+                    auto fvs2 = free_vars(mut, exs2);
+                    exs.include(exs2);
+
+                    for (auto v : exs.getCovering(fvs2))
+                        st.vars_.insert(v);
                 }
             }
 
@@ -111,7 +113,7 @@ public:
 
 private:
     struct FVState {
-        bool mark_   = 0;
+        bool mark_   = false;
         DefSet vars_ = {}; ///< Mutable: local vars; Immutable: free vars.
     };
 

@@ -95,16 +95,21 @@ TEST(internal_fv, simple_peel_off) {
 
     // lam foo (a,b,c,d : I32) : I32 = bar a
     // where lam bar (x:I32) = core::wrap::add core::Mode::none x c
-    auto foo    = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
+    auto foo    = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32())->set("foo");
     auto [a, b] = foo->vars<2>();
-    auto bar    = w.mut_lam(w.type_i32(), w.type_i32());
-    auto x      = bar->var();
+    a->set("a");
+    b->set("b");
+    foo->var()->set("foovar");
+    auto bar = w.mut_lam(w.type_i32(), w.type_i32())->set("bar");
+    auto x   = bar->var()->set("x");
     bar->set(false, w.call(core::wrap::add, core::Mode::none, Defs{x, b}));
     foo->set(false, w.app(bar, a));
-
-    clos2::FVAnalysis ana{};
+    foo->body()->set("foobody");
+    bar->body()->set("barbody");
 
     print(foo);
+
+    clos2::FVAnalysis ana{};
 
     auto fv = ana.free_vars(foo->body());
     ASSERT_EQ(fv.size(), 1);

@@ -12,8 +12,6 @@ namespace mim::plug::clos2 {
 /// Analyse the extractions which are being made inside a Def
 class EXAnalysis {
 private:
-    friend auto& getState(const EXAnalysis& other) { return other.state_; }
-
     struct EXState {
         u16 count                 = 0;  ///< the count of set bits
         std::vector<bool> idx_map = {}; ///< dynamic index bit map
@@ -34,6 +32,19 @@ private:
             return idx_map[idx];
         }
 
+        /// unify with other state
+        bool unify(const EXState& other) {
+            // TODO: using bitsets this can be much faster
+            if (idx_map.size() < other.idx_map.size()) idx_map.resize(other.idx_map.size());
+
+            for (size_t i = 0; i < other.idx_map.size(); i++)
+                idx_map[i] = idx_map[i] || other.idx_map[i];
+
+            auto old_count = count;
+            count          = std::ranges::count(idx_map, true);
+            return old_count != count;
+        }
+
         /// are all indices set
         bool isAllSet() const {
             // an empty state means all indices are set. This is only used for the state of Var#i
@@ -50,6 +61,53 @@ private:
 public:
     /// create extraction analysis for def
     EXAnalysis(const Def* def) { include(def); }
+
+    bool include(const EXAnalysis& other) {
+        bool anychange = false;
+
+        // iterate over all entries of others state
+        for (const auto& [var, map] : other.getState())
+            for (const auto& [tuple, exstate] : map) {
+                if (tuple->isa<Var>()) {
+                    if (state_[var].contains(tuple) && state_[var][tuple].isAllSet()) continue;
+                    if (exstate.isAllSet()) {
+                        state_[var][tuple] = {};
+                        anychange          = true;
+                        continue;
+                    }
+
+                    bool change = state_[var][tuple].unify(exstate);
+
+                    // maybe we just added the last missing extraction.
+                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
+                        std::cout << "collected all extractions of var " << tuple << "\n";
+                        state_[var][tuple] = {}; // mark all as set
+                    }
+                    anychange |= change;
+                } else {
+                    // if tuple is already covered then tuple#exstate is also covered
+                    auto ext = tuple->isa<Extract>();
+                    assert(ext); // TODO: is there some other possible case?
+                    if (isExtCovered(ext, state_[var])) continue;
+
+                    // tuple is not covered so tuple#exstate can be added to the state
+                    bool change = state_[var][tuple].unify(exstate);
+
+                    // maybe we just included all or collected the last missing extractions so peal one off
+                    if (change && state_[var][tuple].count >= tuple->num_tprojs()) {
+                        std::cout << "peal of from " << ext << "\n";
+                        auto it = state_[var].find(tuple);
+                        assert(it != state_[var].end());
+                        state_[var].erase(it);
+                        include(tuple);
+                    }
+                    anychange |= change;
+                }
+            }
+
+        // return if something changed
+        return anychange;
+    }
 
     void include(const Def* def) {
         // if def is Var then set the extractions of def to be all of def
@@ -77,8 +135,11 @@ public:
 
             // set index bit(s) if we dont set all bits.
             if (idx) {
-                map[ext->tuple()].setIdx(*idx);
-                std::cout << "setting idx " << *idx << " for " << ext->tuple() << "\n";
+                if (!map.contains(ext->tuple()) || !map[ext->tuple()].isAllSet()) {
+                    map[ext->tuple()].setIdx(*idx);
+                    std::cout << "setting idx " << *idx << " for " << ext->tuple() << "\n";
+                } else
+                    std::cout << "idx " << *idx << " is already covored by all set\n";
             }
 
             if (!idx || map[ext->tuple()].count >= ext->tuple()->num_tprojs()) {
@@ -189,6 +250,8 @@ private: // helpers
         assert(var);                // TODO: could there be something other then Var?
         return var;
     }
+
+    const GIDNodeMap<const Var*, DefMap<EXState>>& getState() const { return state_; }
 
 private: // state
     GIDNodeMap<const Var*, DefMap<EXState>> state_ = {};
