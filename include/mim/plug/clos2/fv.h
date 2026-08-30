@@ -130,7 +130,7 @@ private:
 
         if (def->isa<Var>())
             st.vars_.insert(def);
-        else if (def->isa<Extract>())
+        else if (auto ext = def->isa<Extract>(); ext && EXAnalysis::getVarOfExt(ext))
             st.vars_.insert(def);
         else
             for (auto dep : def->deps())

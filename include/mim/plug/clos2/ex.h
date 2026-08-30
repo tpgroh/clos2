@@ -128,13 +128,14 @@ public:
             // put var inside
             map[var] = {}; // clear all var extractions which means include all
             std::cout << "added all extractions of var " << var << "\n";
+            return;
         }
 
         // if def is Extract then add it to the state of the Var from which it extracts
-        else if (auto ext = def->isa<Extract>()) {
-            // find the enclosed Var
-            auto var = getVarOfExt(ext);
+        auto ext = def->isa<Extract>();
+        auto var = ext ? getVarOfExt(ext) : nullptr;
 
+        if (var) {
             // add extract to state of var
             auto& map = state_[var];
 
@@ -159,7 +160,8 @@ public:
                     std::cout << "setting all idx for " << ext->tuple() << "\n";
                 } else {
                     std::cout << "peal of " << ext;
-                    // remove ext->tuple() from the map if it was in the map (might not be if we skiped insertion above)
+                    // remove ext->tuple() from the map if it was in the map (might not be if we skiped insertion
+                    // above)
                     auto it = map.find(ext->tuple());
                     if (it != map.end()) map.erase(it);
 
@@ -185,8 +187,9 @@ public:
             return def;
         }
 
-        else if (auto ext = def->isa<Extract>()) {
+        if (auto ext = def->isa<Extract>()) {
             auto var = getVarOfExt(ext);
+            assert(var);
             if (!state_.contains(var)) return {};
             auto map = state_.at(var);
             return getCovering<fast>(ext, map, {});
@@ -211,7 +214,7 @@ public:
         }
 
         auto tuple = ext->tuple()->isa<Extract>();
-        assert(tuple); // TODO: could there be anything else?
+        assert(tuple);
         if (!idx || !map.contains(ext->tuple()))
             return getCovering<fast>(tuple, map, prev); // use t-recursion to find covering
 
@@ -248,9 +251,8 @@ public:
         }
     }
 
-private: // helpers
     /// get the index if const otherwise nullopt
-    std::optional<nat_t> getConstIdx(const Extract* ext) const {
+    static std::optional<nat_t> getConstIdx(const Extract* ext) {
         auto a = Lit::isa(ext->index());
         auto i = ext->tuple()->num_tprojs();
 
@@ -266,12 +268,11 @@ private: // helpers
         return getCovering<true>(ext, map, {}).has_value();
     }
 
-    const Var* getVarOfExt(const Extract* ext) const {
+    static const Var* getVarOfExt(const Extract* ext) {
         const Def* tmp = ext->tuple();
         while (auto t = tmp->isa<Extract>())
             tmp = t->tuple();
-        auto var = tmp->isa<Var>(); // NOTE: I now expect tmp to be a Var
-        assert(var);                // TODO: could there be something other then Var?
+        auto var = tmp->isa<Var>();
         return var;
     }
 
