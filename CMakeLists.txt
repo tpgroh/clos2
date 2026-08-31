@@ -9,6 +9,7 @@ add_mim_plugin(clos2
     SOURCES
         src/clos2.cpp
         src/normalizers.cpp
+        src/phase/clos_conv.cpp
     INSTALL
 )
 
