@@ -1,10 +1,6 @@
 #pragma once
 
-// TODO refactor comments
-
 #include "mim/def.h"
-
-#include "mim/util/util.h"
 
 #include "mim/plug/clos2/ex.h"
 
@@ -24,11 +20,6 @@ public:
     DefSet free_vars(const Def* def, EXAnalysis& exs) {
         if (auto mut = def->isa_mut()) return free_vars(mut, exs);
 
-        /* NOTE:
-         * the expression is immutable. Thus it doesn't introduce new vars.
-         * this means that the free vars are the union of all vars reachable.
-         * thus the union of the localvars of all reachable mutables.
-         */
         auto fvs = local_vars(def);
         for (auto mut : def->local_muts()) {
             EXAnalysis exs2{mut};
@@ -57,11 +48,6 @@ public:
         auto& st = get_state(def);
 
         if (!st.mark_) {
-            // enforce local_muts to be calculated
-            // TODO: can I assume that this is already the case?
-            // Im using this to make sure that local_muts is correct
-            def->free_vars();
-
             for (auto op : def->deps()) {
                 // include all local_vars reachable
                 for (auto d : exs.getCovering(local_vars(op)))
@@ -80,26 +66,12 @@ public:
                 }
             }
 
-            std::cout << "\nafter calculating free vars of " << def << "\n";
-            exs.print();
-
             // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
             // this way we can just drop var without another search for extractions of it
-            if (auto var = def->has_var()) {
-                exs.include(var);
-                std::cout << "\nafter including var of " << def << "\n";
-                exs.print();
-            }
+            if (auto var = def->has_var()) exs.include(var);
 
             // minimize vars_ (there might be entries which are covered by another extraction in exs)
-            std::cout << "free vars before and after minimize\n{ ";
-            for (auto v : st.vars_)
-                std::cout << v << ", ";
-            std::cout << "}\n{ ";
             st.vars_ = exs.getCovering(st.vars_);
-            for (auto v : st.vars_)
-                std::cout << v << ", ";
-            std::cout << "}\n";
 
             // FV(lam x.e) = FV(e) \ {x}
             if (auto var = def->has_var()) st.vars_.erase(var);
@@ -126,8 +98,7 @@ private:
         // create new state empty state for def
         auto& st = state_[def]; // default initializes the state
 
-        // TODO: init free vars
-
+        // init local vars
         if (def->isa<Var>())
             st.vars_.insert(def);
         else if (auto ext = def->isa<Extract>(); ext && EXAnalysis::getVarOfExt(ext))
