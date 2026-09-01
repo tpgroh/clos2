@@ -12,31 +12,6 @@
 using namespace mim;
 using namespace mim::plug;
 
-// TODO: remove this
-void print(const Def* def, DefSet& done, clos2::FVAnalysis& ana) {
-    if (!done.emplace(def).second) return;
-
-    std::cout << "foo " << def << std::endl;
-    auto fv = ana.free_vars(def);
-
-    // print free vars
-    std::cout << "free vars of  " << def << "  (clos2::FVAnalysis, Def::free_vars)\n{";
-    for (auto def : fv)
-        std::cout << def << ", ";
-    std::cout << "}\n" << def->free_vars() << "\n\n";
-
-    for (auto dep : def->deps())
-        print(dep, done, ana);
-}
-
-// TODO: remove this
-void print(const Def* def) {
-    DefSet done{};
-    clos2::FVAnalysis ana{};
-
-    print(def, done, ana);
-}
-
 // a simple to test the very basics
 TEST(internal_fv, simple) {
     Driver driver;
