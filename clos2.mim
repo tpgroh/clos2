@@ -2,22 +2,15 @@
 ///
 /// @see mim::plug::clos2
 ///
-/// A minimal clos2 plugin
-///
 /// [TOC]
+///
+/// This plugin performs *Typed Closure Conversion*.
 ///
 /// ## Dependencies
 ///
-import compile;
 plugin core;
 ///
 /// ## Operations
 ///
-/// ### %%clos2.const_idx
-///
-/// The 42 constant, evaluated using a normalizer
-///
-axm %clos2.const_idx: [n: Nat] → Idx n, normalize_const;
-
 /// ## Phases
 axm %clos2.clos_conv: %compile.Phase;
