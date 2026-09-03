@@ -21,17 +21,6 @@ lam extern _compile(): %compile.Phase =
         %compile.named "%clos2.clos_conv",
     );
 
-lam extern make_adder (x:I32) @ff : I32 -> I32 =
-    add
-    where
-    lam add (y:I32) @ff : I32 = %core.wrap.add 0 (x,y)
-    end;
-
-fun extern main (n: I32) : I32 =
-    let f = make_adder 42I32;
-    let value = f n;
-    return value;
-
 // define a function for testing closure conversion on
 fun extern count (n : I32) : I32 =
     loop (0I32, 0I32)
