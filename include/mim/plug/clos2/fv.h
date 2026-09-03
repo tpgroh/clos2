@@ -21,6 +21,8 @@ public:
 
         auto fvs = local_vars(def);
         for (auto mut : def->local_muts()) {
+            assert(mut->is_set());
+
             EXAnalysis exs2{mut};
             auto fvs2 = free_vars(mut, exs2);
             exs.include(exs2);
@@ -53,6 +55,8 @@ public:
 
             // and add the free vars of every from op reachable mutable
             for (auto mut : op->local_muts()) {
+                assert(mut->is_set());
+
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
                 EXAnalysis exs2{mut};

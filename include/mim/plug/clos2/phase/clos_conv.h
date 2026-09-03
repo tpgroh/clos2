@@ -1,19 +1,19 @@
 #pragma once
+#include "mim/lam.h"
 #include "mim/phase.h"
 
 #include "mim/util/types.h"
 
 #include "mim/plug/clos2/fv.h"
 
-// TODO: how do I detect first class use of functions?
-//
-// TODO: currently I want a closure to be a pair of a function and the environment
-// the type would be (E->A->B, E)
-//
-// TODO: my current idea is that I create the closure at the location where the original function apeared.
-// then I create an apply function lam x:A.c#ff c#tt
-
 namespace mim::plug::clos2 {
+
+struct Closure {
+    const Def* env;
+    const Def* code;
+};
+
+/// for now I want to closure convert everything.
 
 class ClosConv : public RWPhase {
 public:
@@ -21,13 +21,11 @@ public:
         : RWPhase(world, annex) {}
 
 private:
-    bool analyze() final;
+    const Def* rewrite_imm_App(const App*) final;
 
-    FVAnalysis fvana_ = {};
-    bool analyzed_    = false;
+    const Def* create_closure(Lam*);
 
-    /// list of Lam's that should be converted
-    DefSet toBeConverted_ = {};
+    FVAnalysis fvana_{};
 };
 
 } // namespace mim::plug::clos2

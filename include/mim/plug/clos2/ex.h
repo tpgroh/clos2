@@ -81,6 +81,14 @@ public:
 
     /// include a Def into the Analysis
     void include(const Def* def) {
+        DefSet done;
+        return include(def, done);
+    }
+
+    /// include a Def into the Analysis
+    void include(const Def* def, DefSet& done) {
+        if (auto a = done.emplace(def); !a.second) return;
+
         // if def is Var then set the extractions of def to be all of def
         if (auto var = def->isa<Var>()) {
             // clear extractions
@@ -121,7 +129,7 @@ public:
                     if (it != map.end()) map.erase(it);
 
                     // mark every extraction of ext->tuple() as reachable by using t-recursion
-                    return include(ext->tuple());
+                    return include(ext->tuple(), done);
                 }
             }
         }
@@ -129,7 +137,7 @@ public:
         // def was not an Extract so we collect all extractions from it's deps()
         else
             for (auto dep : def->deps())
-                include(dep);
+                include(dep, done);
     }
 
     /// get covered extraction from def
