@@ -17,6 +17,8 @@ public:
 private:
     bool analyze() final;
     const Def* rewrite_imm_App(const App*) final;
+    const Def* rewrite_imm_Lam(const Lam*) final;
+    const Def* rewrite_mut_Lam(Lam*) final;
 
     const Def* get_closure(const Lam*);
 

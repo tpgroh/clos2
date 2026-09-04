@@ -13,6 +13,11 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
+static inline const Lam* isa_convertableLam(const Def* def) {
+    auto lam = def->isa<Lam>();
+    return lam && !lam->is_external() ? lam : nullptr;
+}
+
 bool ClosConv::analyze() {
     DefSet done{};
 
@@ -20,8 +25,9 @@ bool ClosConv::analyze() {
     auto visit = [&](auto&& visit, const Def* def) {
         if (!done.insert(def).second) return;
 
-        if (auto app = def->isa_imm<App>())
-            if (auto lam = app->callee()->isa<Lam>(); lam && !lam->is_external()) convertable_.insert(lam);
+        // NOTE: we cannot convert externals because they would become an immutable tuple which is not allowed.
+        // Rewriter expects external mutables to be rewritten into mutables
+        if (auto lam = isa_convertableLam(def)) convertable_.insert(lam);
 
         for (auto dep : def->deps())
             visit(visit, dep);
@@ -38,8 +44,6 @@ bool ClosConv::analyze() {
 const Def* ClosConv::get_closure(const Lam* old_lam) {
     if (auto it = closures_.find(old_lam); it != closures_.end()) return it->second;
 
-    old_world().dot("middle.dot");
-
     // get the free vars
     auto fvset = fvana_.free_vars(old_lam); // TODO: we can skip if old_lam->is_closed()
     log().d("free vars of {} are {} vs {}", old_lam, fvset, old_lam->free_vars());
@@ -47,16 +51,16 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
     DefVec new_fvs{};
     new_fvs.reserve(fvs.size());
 
-    // create env from free vars
+    // create environment from free vars
     for (auto v : fvs)
         new_fvs.emplace_back(rewrite(v));
     auto environment = new_world().tuple(new_fvs)->set(old_lam->dbg_key())->debug_prefix("environment_");
 
     // create code lambda
+    push(); // TODO: maybe I want to push after mapping old_lam->type() ?
     auto code_codom = map(old_lam->type(), rewrite(old_lam->type()));
     auto code       = new_world().mut_lam(environment->type(), code_codom);
     code->set(old_lam->dbg_key())->debug_prefix("closed_");
-    push(); // TODO: maybe I want to push before mapping old_lam->type() ?
     auto env = code->var();
     env->set(old_lam->dbg_key())->debug_prefix("code_env_");
 
@@ -75,7 +79,8 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
             map(fvs[i], env->proj(env_size, i));
 
     // now create code body taking advantage of the lookup machinery
-    auto code_body = rewrite(old_lam);
+    auto code_body
+        = old_lam->is_mutable() ? RWPhase::rewrite_mut_Lam(old_lam->as_mut<Lam>()) : RWPhase::rewrite_imm_Lam(old_lam);
     pop();
 
     code->set(false, code_body);
@@ -86,11 +91,23 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
     return closure;
 }
 
+// closure 'allocation'
+const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
+    if (convertable_.contains(old_lam)) return get_closure(old_lam);
+    return RWPhase::rewrite_imm_Lam(old_lam);
+}
+
+const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
+    if (convertable_.contains(old_lam)) return get_closure(old_lam);
+    return RWPhase::rewrite_mut_Lam(old_lam);
+}
+
+// enforce closure calling convention
 const Def* ClosConv::rewrite_imm_App(const App* old_app) {
     auto old_callee = old_app->callee();
     auto old_arg    = old_app->arg();
-    auto lam        = old_callee->isa<Lam>();
-    if (!lam || lam->is_external()) {
+    auto lam        = isa_convertableLam(old_callee);
+    if (!lam) {
         auto new_app = RWPhase::rewrite_imm_App(old_app);
         return map(old_app, new_app->set(old_app->dbg_key()));
     }
