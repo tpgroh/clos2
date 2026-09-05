@@ -1,6 +1,7 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
 #include "mim/phase.h"
+#include "mim/tuple.h"
 
 // TODO: in the creation of a recursive closure I'm currently messing up.
 // I want to overwrite the rewrite_*_Lam methods to directly overwrite the lam 'allocation' with the closure.
@@ -21,13 +22,31 @@ static inline const Lam* isa_convertableLam(const Def* def) {
 bool ClosConv::analyze() {
     DefSet done{};
 
+    old_world().dump();
+    old_world().dot("middle.dot");
+
     // find all lambdas that we have to convert
     auto visit = [&](auto&& visit, const Def* def) {
         if (!done.insert(def).second) return;
 
-        // NOTE: we cannot convert externals because they would become an immutable tuple which is not allowed.
-        // Rewriter expects external mutables to be rewritten into mutables
-        if (auto lam = isa_convertableLam(def)) convertable_.insert(lam);
+        if (auto app = def->isa_imm<App>()) {
+            if (auto lam = isa_convertableLam(app->callee())) {
+                convertable_.insert(lam);
+                closureCallsites_.insert(app);
+            }
+
+            // TODO: this is a complete hack...
+            // what I actually want to do is to check if any of the projs has to be converted.
+            // if so I want to convert those and all the other ones have to be converted into a dummy closure.
+            // dummy closure meaning [lam, ()] without closing old lam
+            else if (auto br = app->callee()->isa<Extract>())
+                for (auto b : br->tuple()->projs())
+                    if (auto lam = isa_convertableLam(b)) {
+                        log().d("found application on an extraction {}", b);
+                        convertable_.insert(lam);
+                        closureCallsites_.insert(app);
+                    }
+        }
 
         for (auto dep : def->deps())
             visit(visit, dep);
@@ -42,7 +61,12 @@ bool ClosConv::analyze() {
 }
 
 const Def* ClosConv::get_closure(const Lam* old_lam) {
-    if (auto it = closures_.find(old_lam); it != closures_.end()) return it->second;
+    if (auto it = closures_.find(old_lam); it != closures_.end()) {
+        log().d("detected use of the already created closure {} of {}", it->second, old_lam);
+        return it->second;
+    }
+
+    log().d("creating closure for {}", old_lam);
 
     // get the free vars
     auto fvset = fvana_.free_vars(old_lam); // TODO: we can skip if old_lam->is_closed()
@@ -72,21 +96,39 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
 
     // map free vars to corresponding extractions of env
     auto env_size = new_fvs.size();
-    if (env_size == 1)
+    if (env_size == 1) {
+        log().d("mapping {} -> {}", fvs[0], env);
         map(fvs[0], env);
-    else if (env_size > 1)
-        for (size_t i = 0; i < env_size; i++)
-            map(fvs[i], env->proj(env_size, i));
+    } else if (env_size > 1)
+        for (size_t i = 0; i < env_size; i++) {
+            log().d("mapping {} -> {}#{}", fvs[i], env, i);
+            map(fvs[i], env->proj(i));
+        }
 
     // now create code body taking advantage of the lookup machinery
-    auto code_body
-        = old_lam->is_mutable() ? RWPhase::rewrite_mut_Lam(old_lam->as_mut<Lam>()) : RWPhase::rewrite_imm_Lam(old_lam);
+    log().d("creating body of {}", code);
+    const Def* code_body;
+    if (!old_lam->is_mutable())
+        code_body = RWPhase::rewrite_imm_Lam(old_lam);
+    else { // essentially rewrite_mut_Lam but without the maps because we do not want to map old_lam to code_body!
+        code_body    = RWPhase::rewrite_mut_Lam(old_lam->as_mut<Lam>());
+        auto old_mut = old_lam->as_mut<Lam>();
+        Def* new_mut = new_world().mut_lam(code_codom->as<Pi>());
+
+        assert(old_mut->is_set());
+        auto _ = enter(old_mut);
+        for (size_t i = 0, e = old_mut->num_ops(); i != e; ++i)
+            new_mut->set(i, rewrite(old_mut->op(i)));
+
+        code_body = new_mut;
+    }
+
     pop();
 
     code->set(false, code_body);
     // code->externalize(); // TODO: uncomment as soon as possible
 
-    log().d("packed closure {} of lam {} with free vars {}", closure, old_lam, fvset);
+    log().d("packed closure {} of lam {}", closure, old_lam);
 
     return closure;
 }
@@ -98,23 +140,28 @@ const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    if (convertable_.contains(old_lam)) return get_closure(old_lam);
+    if (convertable_.contains(old_lam)) {
+        auto _ = enter(old_lam); // TODO: ??
+        return get_closure(old_lam);
+    }
     return RWPhase::rewrite_mut_Lam(old_lam);
 }
 
 // enforce closure calling convention
 const Def* ClosConv::rewrite_imm_App(const App* old_app) {
-    auto old_callee = old_app->callee();
-    auto old_arg    = old_app->arg();
-    auto lam        = isa_convertableLam(old_callee);
-    if (!lam) {
+    if (!closureCallsites_.contains(old_app)) {
         auto new_app = RWPhase::rewrite_imm_App(old_app);
-        return map(old_app, new_app->set(old_app->dbg_key()));
+        return new_app->set(old_app->dbg_key());
     }
 
+    auto old_callee = old_app->callee();
+    auto old_arg    = old_app->arg();
+    log().d("I expect the following rewrite of {} to return a closure", old_callee);
+
     // create closure of lam
-    assert(convertable_.contains(lam));
-    const Def* clos = get_closure(lam);
+    const Def* clos = rewrite(old_callee);
+    assert(clos);
+    log().d("and got {}", clos);
 
     // create argument
     auto new_arg = rewrite(old_arg)->set(old_arg->dbg_key());
@@ -129,7 +176,5 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
 
     // reapply the argument
     auto new_app = new_world().app(new_callee, new_arg);
-    new_app->set(old_app->dbg_key());
-
-    return map(old_app, new_app);
+    return new_app->set(old_app->dbg_key());
 }

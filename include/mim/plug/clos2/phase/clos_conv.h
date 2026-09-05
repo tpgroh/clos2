@@ -24,6 +24,7 @@ private:
 
     FVAnalysis fvana_{};
     DefSet convertable_{};
+    DefSet closureCallsites_{};
     Def2Def closures_{};
 };
 
