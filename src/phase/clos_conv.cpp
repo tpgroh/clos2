@@ -1,6 +1,7 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
 #include <format>
+#include <optional>
 
 #include "mim/phase.h"
 #include "mim/tuple.h"
@@ -24,6 +25,7 @@ static inline const Lam* isa_convertableLam(const Def* def) {
 bool ClosConv::analyze() {
     DefSet done{};
 
+    // TODO: I'm doing this because to be able to debug with the names of nodes after the cleanup_ phase
     old_world().dump();
     old_world().dot("middle.dot");
 
@@ -94,7 +96,8 @@ const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
     // put the stub in the closure list and insert the old_lam into the work list.
     // the body of code will be rewritten in finalize
     worklist_.emplace(old_lam);
-    closures_[old_lam] = {fvs, code};
+    closures_[old_lam] = {.fvs = fvs, .env = environment, .code = code};
+
     return closures_[old_lam];
 }
 
@@ -134,48 +137,28 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
     return code;
 }
 
-// closure 'allocation'
-const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    if (convertable_.contains(old_lam)) return get_closure(old_lam);
-    return RWPhase::rewrite_imm_Lam(old_lam);
+const Def* ClosConv::Stub::pack() {
+    auto& w = code->world();
+
+    auto s = w.sigma({code, env})->set("closure");
+    return s;
 }
 
-const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    if (convertable_.contains(old_lam)) {
-        auto _ = enter(old_lam); // TODO: ??
-        return get_closure(old_lam);
-    }
-    return RWPhase::rewrite_mut_Lam(old_lam);
+std::optional<std::pair<const Lam*, const Def*>> ClosConv::Stub::isa_closure(const Def* def) {
+    auto sig = def->isa_imm<Sigma>();
+    if (!sig) return {};
+    return std::pair{sig->proj(2, 0)->as<Lam>(), sig->proj(2, 1)};
 }
 
 // enforce closure calling convention
 const Def* ClosConv::rewrite_imm_App(const App* old_app) {
-    if (!closureCallsites_.contains(old_app)) {
-        auto new_app = RWPhase::rewrite_imm_App(old_app);
-        return new_app->set(old_app->dbg_key());
-    }
+    auto new_callee = rewrite(old_app->callee());
+    auto new_arg    = rewrite(old_app->arg());
 
-    auto old_callee = old_app->callee();
-    auto old_arg    = old_app->arg();
-    log().d("I expect the following rewrite of {} to return a closure", old_callee);
+    auto clos = Stub::isa_closure(new_callee);
+    if (!clos) return new_world().app(new_callee, new_arg)->set(old_app->dbg_key());
 
-    // create closure of lam
-    const Def* clos = rewrite(old_callee);
-    assert(clos);
-    log().d("and got {}", clos);
+    auto [code, env] = *clos;
 
-    // create argument
-    auto new_arg = rewrite(old_arg)->set(old_arg->dbg_key());
-
-    // use the calling convention for closures
-    auto [code, env] = clos->projs<2>();
-    log().d("unpacked closure {} to code {} and environment {}", clos, code, env);
-    auto new_callee = new_world().app(code, env);
-    new_callee->set(old_callee->dbg_key());
-
-    log().d("now reapply argument {} to {}", new_arg, new_callee);
-
-    // reapply the argument
-    auto new_app = new_world().app(new_callee, new_arg);
-    return new_app->set(old_app->dbg_key());
+    return new_world().app(code, {env, new_arg});
 }

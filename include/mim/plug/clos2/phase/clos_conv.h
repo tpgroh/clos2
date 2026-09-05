@@ -1,5 +1,7 @@
 #pragma once
+#include <optional>
 #include <queue>
+#include <utility>
 
 #include "mim/def.h"
 #include "mim/lam.h"
@@ -24,15 +26,18 @@ private:
 
     struct Stub {
         DefVec fvs;
+
+        const Def* env;
         Lam* code;
+
+        const Def* pack();
+        static std::optional<std::pair<const Lam*, const Def*>> isa_closure(const Def*);
     };
 
     const Stub& get_Stub(const Lam*);
     const Def* rewrite_body(Stub&, const Lam*);
 
     bool analyze() final;
-    const Def* rewrite_imm_Lam(const Lam*) final;
-    const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_App(const App*) final;
 
     FVAnalysis fvana_{};
