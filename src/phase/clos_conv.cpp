@@ -1,5 +1,7 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
+#include <format>
+
 #include "mim/phase.h"
 #include "mim/tuple.h"
 
@@ -60,13 +62,13 @@ bool ClosConv::analyze() {
     return false;
 }
 
-const Def* ClosConv::get_closure(const Lam* old_lam) {
+const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
     if (auto it = closures_.find(old_lam); it != closures_.end()) {
-        log().d("detected use of the already created closure {} of {}", it->second, old_lam);
+        log().d("reuse stub for {}", old_lam);
         return it->second;
     }
 
-    log().d("creating closure for {}", old_lam);
+    log().d("creating stub for {}", old_lam);
 
     // get the free vars
     auto fvset = fvana_.free_vars(old_lam); // TODO: we can skip if old_lam->is_closed()
@@ -74,63 +76,62 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
     DefVec fvs{fvset.begin(), fvset.end()};
     DefVec new_fvs{};
     new_fvs.reserve(fvs.size());
-
-    // create environment from free vars
     for (auto v : fvs)
         new_fvs.emplace_back(rewrite(v));
-    auto environment = new_world().tuple(new_fvs)->set(old_lam->dbg_key())->debug_prefix("environment_");
 
-    // create code lambda
-    push(); // TODO: maybe I want to push after mapping old_lam->type() ?
-    auto code_codom = map(old_lam->type(), rewrite(old_lam->type()));
-    auto code       = new_world().mut_lam(environment->type(), code_codom);
-    code->set(old_lam->dbg_key())->debug_prefix("closed_");
-    auto env = code->var();
-    env->set(old_lam->dbg_key())->debug_prefix("code_env_");
+    // create the environment
+    // NOTE: we create the environment as a singleton to enforce the requirement:
+    // the code procedure gets exactly the environment which was created for it
+    auto& w          = new_world();
+    auto environment = w.uniq(w.tuple(new_fvs))->set(old_lam->dbg_key())->debug_prefix("environment_");
 
-    // to make recursive closures work I'm creating the closure
-    // before completing the creation of the code lambda
-    auto closure = new_world().tuple({code, environment});
-    closure->set(old_lam->dbg_key())->debug_prefix("closure_of_");
-    closures_[old_lam] = closure;
+    // create the code lam
+    // TODO: for dependant types I'll have to make the codom to depend on the argument
+    auto dom   = rewrite(old_lam->type()->dom());
+    auto codom = rewrite(old_lam->type()->codom());
+    auto code  = w.mut_lam(w.tuple(Defs{environment->type(), dom}), codom);
 
-    // map free vars to corresponding extractions of env
-    auto env_size = new_fvs.size();
-    if (env_size == 1) {
-        log().d("mapping {} -> {}", fvs[0], env);
-        map(fvs[0], env);
-    } else if (env_size > 1)
-        for (size_t i = 0; i < env_size; i++) {
-            log().d("mapping {} -> {}#{}", fvs[i], env, i);
-            map(fvs[i], env->proj(i));
+    // put the stub in the closure list and insert the old_lam into the work list.
+    // the body of code will be rewritten in finalize
+    worklist_.emplace(old_lam);
+    closures_[old_lam] = {fvs, code};
+    return closures_[old_lam];
+}
+
+const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
+    auto& w   = new_world();
+    auto code = stub.code;
+
+    log().d("rewriting body for stub closure of {}", old_lam);
+
+    // TODO: maybe there is something different if the old_lam is not mutable. I'll see when I get there
+    auto [env, arg] = code->vars<2>();
+
+    push();
+
+    // mapping free vars to extractions of env
+    if (stub.fvs.size() == 1) {
+        log().d("mapping single free var directly to env");
+        map(stub.fvs[0], env);
+    } else
+        for (size_t i = 0; i < stub.fvs.size(); i++) {
+            auto v = stub.fvs[i];
+            auto e = w.extract(env, i)->set(v->dbg_key())->debug_prefix(std::format("env_ext_{}_", i));
+            log().d("mapping {} to env#{}", v, i);
+            map(v, e);
         }
-
-    // now create code body taking advantage of the lookup machinery
-    log().d("creating body of {}", code);
-    const Def* code_body;
-    if (!old_lam->is_mutable())
-        code_body = RWPhase::rewrite_imm_Lam(old_lam);
-    else { // essentially rewrite_mut_Lam but without the maps because we do not want to map old_lam to code_body!
-        code_body    = RWPhase::rewrite_mut_Lam(old_lam->as_mut<Lam>());
-        auto old_mut = old_lam->as_mut<Lam>();
-        Def* new_mut = new_world().mut_lam(code_codom->as<Pi>());
-
-        assert(old_mut->is_set());
-        auto _ = enter(old_mut);
-        for (size_t i = 0, e = old_mut->num_ops(); i != e; ++i)
-            new_mut->set(i, rewrite(old_mut->op(i)));
-
-        code_body = new_mut;
+    if (auto v = old_lam->has_var()) {
+        log().d("mapping argument of old_lam to arg");
+        map(v, arg);
     }
+
+    // rewrite code
+    // TODO: to allow for recursion I have to make sure that I already map old_lam to (code env)
+    code->set(Lam::Filter{rewrite(old_lam->filter())}, rewrite(old_lam->body()));
 
     pop();
 
-    code->set(false, code_body);
-    // code->externalize(); // TODO: uncomment as soon as possible
-
-    log().d("packed closure {} of lam {}", closure, old_lam);
-
-    return closure;
+    return code;
 }
 
 // closure 'allocation'
