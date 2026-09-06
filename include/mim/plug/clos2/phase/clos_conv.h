@@ -38,7 +38,10 @@ private:
     const Def* rewrite_body(Stub&, const Lam*);
 
     bool analyze() final;
+    const Def* rewrite_mut_Lam(Lam*) final;
+    const Def* rewrite_imm_Lam(const Lam*) final;
     const Def* rewrite_imm_App(const App*) final;
+    void finalize() final;
 
     FVAnalysis fvana_{};
     DefSet convertable_{};
