@@ -18,33 +18,16 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-static inline const Lam* isa_convertableLam(const Def* def) {
-    auto lam = def->isa<Lam>();
-    return lam && !lam->is_external() ? lam : nullptr;
-}
-
 bool ClosConv::analyze() {
     DefSet done{};
 
     // TODO: I'm doing this because to be able to debug with the names of nodes after the cleanup_ phase
     old_world().dump();
-    old_world().dot("middle.dot");
+    old_world().dot("middle.dot", {.follow_types = true});
 
     // find all lambdas that we have to convert
     auto visit = [&](auto&& visit, const Def* def) {
         if (!done.insert(def).second) return;
-
-        if (auto app = def->isa_imm<App>()) {
-            if (auto lam = isa_convertableLam(app->callee())) convertable_.insert(lam);
-
-            // TODO: this is a complete hack...
-            // what I actually want to do is to check if any of the projs has to be converted.
-            // if so I want to convert those and all the other ones have to be converted into a dummy closure.
-            // dummy closure meaning [lam, ()] without closing old lam
-            else if (auto br = app->callee()->isa<Extract>())
-                for (auto b : br->tuple()->projs())
-                    if (auto lam = isa_convertableLam(b)) convertable_.insert(lam);
-        }
 
         for (auto dep : def->deps())
             visit(visit, dep);
@@ -159,21 +142,39 @@ std::optional<std::pair<const Lam*, const Def*>> ClosConv::Stub::isa_closure(con
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    if (!convertable_.contains(old_lam)) return RWPhase::rewrite_imm_Lam(old_lam);
+    if (old_lam->is_external()) return RWPhase::rewrite_imm_Lam(old_lam);
+    // if (!convertable_.contains(old_lam)) return RWPhase::rewrite_imm_Lam(old_lam);
 
     // create stub and return the closure.
     log().d("closure convert imm lam {}", old_lam);
     auto stub = get_Stub(old_lam);
+    if (old_lam->is_external()) {
+        assert(stub.fvs.size() == 0);
+        return stub.code;
+    }
     return map(old_lam, stub.pack());
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    if (!convertable_.contains(old_lam)) return RWPhase::rewrite_mut_Lam(old_lam);
+    if (old_lam->is_external()) return RWPhase::rewrite_mut_Lam(old_lam);
+    // if (!convertable_.contains(old_lam)) return RWPhase::rewrite_mut_Lam(old_lam);
 
     // create stub and return the closure.
     log().d("closure convert mut lam {}", old_lam);
     auto stub = get_Stub(old_lam);
+    if (old_lam->is_external()) {
+        assert(stub.fvs.size() == 0);
+        return stub.code;
+    }
     return map(old_lam, stub.pack());
+}
+
+void ClosConv::rewrite_external(Def* old_mut) {
+    auto new_def = rewrite_root(old_mut);
+    if (auto clos = Stub::isa_closure(new_def)) return;
+
+    auto new_mut = rewrite_root(old_mut)->as_mut();
+    if (old_mut->is_external()) new_mut->externalize();
 }
 
 // enforce closure calling convention
@@ -183,7 +184,11 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
     auto new_arg    = rewrite(old_app->arg());
 
     auto clos = Stub::isa_closure(new_callee);
-    if (!clos) return w.app(new_callee, new_arg)->set(old_app->dbg_key());
+    if (!clos) {
+        log().d("the callee was not detected as a closure. old_app:{}, new_callee:{}, new_arg:{}", old_app, new_callee,
+                new_arg);
+        return w.app(new_callee, new_arg)->set(old_app->dbg_key());
+    }
 
     auto [code, env] = *clos;
 

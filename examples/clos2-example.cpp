@@ -17,11 +17,28 @@ plugin compile;
 
 // define a custom pipeline for optimization
 lam extern _compile(): %compile.Phase =
+	let optimize =
+        // fixed-point iteration off by default; enable with `-X compile:aggr`
+        %compile.phases (%compile.aggr ff) (
+            %compile.scalarize,
+            %compile.phases tt (
+                %compile.beta_red,
+                %compile.eta_conv,
+            ),
+            %compile.named "%mem.seo",
+            %compile.static_arg_opt,
+        );
+
     %compile.phases ff (
+		optimize,
+		%compile.branch_normalize,
         %compile.named "%clos2.clos_conv",
     );
 
-// define a function for testing closure conversion on
+fun extern make_adder (n : I32) @ff : I32->I32 =
+    lam add (x:I32) : I32 = %core.wrap.add 0 (x,n);
+    return add;
+
 fun extern count (n : I32) : I32 =
     loop (0I32, 0I32)
     where
@@ -51,12 +68,12 @@ int main(int, char**) {
     assert(mod);
     mod->compile(ast);
 
-    world.dot("before.dot");
+    world.dot("before.dot", {.follow_types = true});
     world.dump();
 
     optimize(world);
 
-    world.dot("after.dot");
+    world.dot("after.dot", {.follow_types = true});
     world.dump();
 
     return EXIT_SUCCESS;
