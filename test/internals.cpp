@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+#include <doctest/doctest.h>
 
 #include <mim/plug/core/core.h>
 
@@ -13,7 +13,7 @@ using namespace mim;
 using namespace mim::plug;
 
 // a simple to test the very basics
-TEST(internal_fv, simple) {
+TEST_CASE("clos2-fvanalysis-simple") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -30,26 +30,26 @@ TEST(internal_fv, simple) {
     clos2::FVAnalysis ana{};
 
     auto fv = ana.free_vars(foo->body());
-    ASSERT_EQ(fv.size(), 2);
-    ASSERT_TRUE(fv.contains(a));
-    ASSERT_TRUE(fv.contains(c));
+    CHECK(fv.size() == 2);
+    CHECK(fv.contains(a));
+    CHECK(fv.contains(c));
 
     fv = ana.free_vars(foo);
-    ASSERT_EQ(fv.size(), 0);
+    CHECK(fv.size() == 0);
 
     fv = ana.free_vars(bar);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(c));
+    CHECK(fv.size() == 1);
+    CHECK(fv.contains(c));
 
     fv = ana.free_vars(bar->body());
-    ASSERT_EQ(fv.size(), 2);
-    ASSERT_TRUE(fv.contains(x));
-    ASSERT_TRUE(fv.contains(c));
+    CHECK(fv.size() == 2);
+    CHECK(fv.contains(x));
+    CHECK(fv.contains(c));
 }
 
 // simple test to check if the extractions of a var will be unpeeled into including the var if the union of free vars
 // included all extractions of it
-TEST(internal_fv, simple_peel_off) {
+TEST_CASE("internals_simple_peel_off") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -64,24 +64,24 @@ TEST(internal_fv, simple_peel_off) {
     clos2::FVAnalysis ana{};
 
     auto fv = ana.free_vars(foo->body());
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(foo->var()));
+    CHECK(fv.size() == 1);
+    CHECK(fv.contains(foo->var()));
 
     fv = ana.free_vars(foo);
-    ASSERT_EQ(fv.size(), 0);
+    CHECK(fv.size() == 0);
 
     fv = ana.free_vars(bar);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(b));
+    CHECK(fv.size() == 1);
+    CHECK(fv.contains(b));
 
     fv = ana.free_vars(bar->body());
-    ASSERT_EQ(fv.size(), 2);
-    ASSERT_TRUE(fv.contains(x));
-    ASSERT_TRUE(fv.contains(b));
+    CHECK(fv.size() == 2);
+    CHECK(fv.contains(x));
+    CHECK(fv.contains(b));
 }
 
 // test if dangling extractions get removed correctly
-TEST(internal_fv, trans_peel_off) {
+TEST_CASE("internals_trans_peel_off") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -112,22 +112,22 @@ TEST(internal_fv, trans_peel_off) {
     clos2::FVAnalysis ana{};
 
     auto fv = ana.free_vars(f1);
-    ASSERT_EQ(fv.size(), 2);
-    ASSERT_TRUE(fv.contains(b));
-    ASSERT_TRUE(fv.contains(u));
+    CHECK(fv.size() == 2);
+    CHECK(fv.contains(b));
+    CHECK(fv.contains(u));
 
     fv = ana.free_vars(f2);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(a));
+    CHECK(fv.size() == 1);
+    CHECK(fv.contains(a));
 
     fv = ana.free_vars(f3);
-    ASSERT_EQ(fv.size(), 1);
-    ASSERT_TRUE(fv.contains(foo->var(2, 1)));
+    CHECK(fv.size() == 1);
+    CHECK(fv.contains(foo->var(2, 1)));
 }
 
 // tests that it doesn't unpeel if it is not extracting directly from a Var with an arity higher or equal to the
 // scalarize_threshold
-TEST(internal_fv, threshold1) {
+TEST_CASE("internals_threshold1") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -145,13 +145,13 @@ TEST(internal_fv, threshold1) {
 
     clos2::FVAnalysis ana;
     auto fvs = ana.free_vars(foo->body());
-    ASSERT_EQ(fvs.size(), w.flags().scalarize_threshold);
+    CHECK(fvs.size() == w.flags().scalarize_threshold);
     for (size_t i = 0; i < w.flags().scalarize_threshold; i++)
-        ASSERT_TRUE(fvs.contains(foo->var(i)->proj(0)));
+        CHECK(fvs.contains(foo->var(i)->proj(0)));
 }
 
 // tests if it unpeels if extracting from a var which has an arity higher or equal to the scalarize_threshold
-TEST(internal_fv, threshold2) {
+TEST_CASE("internals_threshold2") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -162,11 +162,11 @@ TEST(internal_fv, threshold2) {
     clos2::FVAnalysis ana;
     auto fvs = ana.free_vars(foo->body());
 
-    ASSERT_EQ(fvs.size(), 1);
-    ASSERT_TRUE(fvs.contains(foo->var()));
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(foo->var()));
 }
 
-TEST(internal_fv, extract_from_lam) {
+TEST_CASE("internals_extract_from_lam") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -180,9 +180,9 @@ TEST(internal_fv, extract_from_lam) {
 
     clos2::FVAnalysis ana;
     auto fvs = ana.free_vars(foo);
-    ASSERT_EQ(fvs.size(), 0);
+    CHECK(fvs.size() == 0);
 
     fvs = ana.free_vars(foo->body());
-    ASSERT_EQ(fvs.size(), 1);
-    ASSERT_TRUE(fvs.contains(foo->var()));
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(foo->var()));
 }
