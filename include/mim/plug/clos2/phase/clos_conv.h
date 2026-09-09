@@ -32,6 +32,7 @@ private:
 
         const Def* pack();
         static std::optional<std::pair<const Lam*, const Def*>> isa_closure(const Def*);
+        // const Def* clos_type(const Def*, const Def*, const Def*); // TODO: implement
     };
 
     const Stub& get_Stub(const Lam*);
@@ -42,6 +43,8 @@ private:
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
     const Def* rewrite_imm_App(const App*) final;
+    const Def* rewrite_imm_Pi(const Pi*) final;
+    const Def* rewrite_mut_Pi(Pi*) final;
     void finalize() final;
 
     FVAnalysis fvana_{};

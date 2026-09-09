@@ -88,7 +88,7 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
     auto& w   = new_world();
     auto code = stub.code;
 
-    log().d("rewriting body for stub closure of {}", old_lam);
+    log().e("rewriting body for stub closure of {}", old_lam);
 
     // TODO: maybe there is something different if the old_lam is not mutable. I'll see when I get there
     auto [env, arg] = code->vars<2>();
@@ -112,8 +112,11 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
     }
 
     // rewrite code
-    // TODO: to allow for recursion I have to make sure that I already map old_lam to (code env)
-    code->set(Lam::Filter{rewrite(old_lam->filter())}, rewrite(old_lam->body()));
+    auto filter = rewrite(old_lam->filter());
+    auto body   = rewrite(old_lam->body());
+    log().d("rewrote filter to {}", filter);
+    log().d("rewrote body to {} of type {}", body, body->type());
+    code->set(filter, body);
 
     pop();
 
@@ -123,58 +126,80 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
 const Def* ClosConv::Stub::pack() {
     auto& w = code->world();
 
-    // TODO: there must be a better way to type closures.
-    // maybe annotate the tuple with some special tag?
+    // TODO: use Sigma with named fields
     // @see also TODO in isa_closure
+
     auto clos = w.tuple({code, env})->as<Tuple>()->set("closure");
-    w.log().d("packed closure  {}", clos);
+    w.log().i("packed closure  {}", clos);
     return clos;
 }
 
 std::optional<std::pair<const Lam*, const Def*>> ClosConv::Stub::isa_closure(const Def* def) {
-    // TODO: there must be a better way to detect closure types.
-    // maybe annotate the tuple with some special tag?
+    // TODO: use Sigma with named fields
     auto tup = def->isa_imm<Tuple>();
     if (!tup) return {};
     auto pair = std::pair{tup->proj(2, 0)->as<Lam>(), tup->proj(2, 1)};
-    tup->world().log().d("unpacked closure {{.code={}, .env={}}}", pair.first, pair.second);
+    tup->world().log().i("unpacked closure {{.code={}, .env={}}}", pair.first, pair.second);
     return pair;
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    if (old_lam->is_external()) return RWPhase::rewrite_imm_Lam(old_lam);
-    // if (!convertable_.contains(old_lam)) return RWPhase::rewrite_imm_Lam(old_lam);
-
     // create stub and return the closure.
-    log().d("closure convert imm lam {}", old_lam);
+    log().i("closure convert imm lam {}", old_lam);
     auto stub = get_Stub(old_lam);
-    if (old_lam->is_external()) {
-        assert(stub.fvs.size() == 0);
-        return stub.code;
-    }
     return map(old_lam, stub.pack());
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    if (old_lam->is_external()) return RWPhase::rewrite_mut_Lam(old_lam);
-    // if (!convertable_.contains(old_lam)) return RWPhase::rewrite_mut_Lam(old_lam);
-
     // create stub and return the closure.
-    log().d("closure convert mut lam {}", old_lam);
+    log().i("closure convert mut lam {}", old_lam);
     auto stub = get_Stub(old_lam);
-    if (old_lam->is_external()) {
-        assert(stub.fvs.size() == 0);
-        return stub.code;
-    }
     return map(old_lam, stub.pack());
 }
 
 void ClosConv::rewrite_external(Def* old_mut) {
+    log().i("rewrite external {}", old_mut);
     auto new_def = rewrite_root(old_mut);
-    if (auto clos = Stub::isa_closure(new_def)) return;
+    if (auto clos = Stub::isa_closure(new_def)) return; // TODO: externalize the code lambda from the closure
 
-    auto new_mut = rewrite_root(old_mut)->as_mut();
-    if (old_mut->is_external()) new_mut->externalize();
+    if (old_mut->is_external()) new_def->as_mut()->externalize();
+}
+
+// BUG: I think I dont want to rewrite dependent types...
+// for example of Idx which is Nat -> *
+
+const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
+    log().d("rewriting imm pi {}", pi);
+    // return RWPhase::rewrite_imm_Pi(pi);
+    auto& w = new_world();
+
+    auto new_dom   = rewrite(pi->dom());
+    auto new_codom = rewrite(pi->codom());
+
+    auto t1 = new_dom->type()->isa<Type>();
+    auto t2 = new_codom->type()->isa<Type>();
+    if (!t1 || !t2 || t1 != w.type() || t2 != w.type()) {
+        auto new_pi = w.pi(new_dom, new_codom, pi->is_implicit());
+        log().d("rewritten imm pi {} to {}", pi, new_pi);
+        return new_pi;
+    }
+
+    // abstract over the type of the environment
+    auto Tpi       = w.mut_pi(w.type<1>(), true)->set_dom(w.type());
+    auto T         = Tpi->var();
+    auto code_type = w.pi({T, rewrite(pi->dom())}, rewrite(pi->codom()), pi->is_implicit());
+    // TODO: get the closure type by a method from Stub to keep that stuff in one place
+    auto clos_type = w.sigma({code_type, T});
+    Tpi->set_codom(clos_type);
+    log().d("rewritten imm pi {} : {}  to  {} : {}", pi, pi->type(), Tpi, Tpi->type());
+    return Tpi;
+}
+
+const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
+    log().d("rewriting mut pi {}", pi);
+    auto new_pi = RWPhase::rewrite_mut_Pi(pi);
+    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), new_pi, new_pi->type());
+    return new_pi;
 }
 
 // enforce closure calling convention
@@ -198,6 +223,7 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
 }
 
 void ClosConv::finalize() {
+    log().i("finalize()");
     while (!worklist_.empty()) {
         auto old_lam = worklist_.front();
         worklist_.pop();
