@@ -18,29 +18,6 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-bool ClosConv::analyze() {
-    DefSet done{};
-
-    // TODO: I'm doing this because to be able to debug with the names of nodes after the cleanup_ phase
-    old_world().dump();
-    old_world().dot("middle.dot", {.follow_types = true});
-
-    // find all lambdas that we have to convert
-    auto visit = [&](auto&& visit, const Def* def) {
-        if (!done.insert(def).second) return;
-
-        for (auto dep : def->deps())
-            visit(visit, dep);
-    };
-
-    for (auto root : old_world().roots())
-        visit(visit, root);
-
-    log().d("the following lambda where found to be closure convertable {}", convertable_);
-
-    return false;
-}
-
 const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
     if (auto it = closures_.find(old_lam); it != closures_.end()) {
         log().d("reuse stub for {}", old_lam);
@@ -129,18 +106,33 @@ const Def* ClosConv::Stub::pack() {
     // TODO: use Sigma with named fields
     // @see also TODO in isa_closure
 
-    auto clos = w.tuple({code, env})->as<Tuple>()->set("closure");
+    auto clos = w.tuple({env, code})->as<Tuple>()->set("closure");
     w.log().i("packed closure  {}", clos);
     return clos;
 }
 
-std::optional<std::pair<const Lam*, const Def*>> ClosConv::Stub::isa_closure(const Def* def) {
+std::optional<std::pair<const Def*, const Lam*>> ClosConv::Stub::isa_closure(const Def* def) {
     // TODO: use Sigma with named fields
     auto tup = def->isa_imm<Tuple>();
     if (!tup) return {};
-    auto pair = std::pair{tup->proj(2, 0)->as<Lam>(), tup->proj(2, 1)};
-    tup->world().log().i("unpacked closure {{.code={}, .env={}}}", pair.first, pair.second);
+    auto pair = std::pair{tup->proj(2, 0), tup->proj(2, 1)->as<Lam>()};
+    tup->world().log().i("unpacked closure {{.env={}, .code={}}}", pair.first, pair.second);
     return pair;
+}
+
+const Def* ClosConv::Stub::clos_type(const Def* dom, const Def* codom, bool implicit) {
+    auto& w  = dom->world();
+    auto sig = w.mut_sigma(2);
+
+    // keep the env type abstract of type *
+    sig->set(0, w.type());
+
+    // code type
+    sig->set(1, w.pi({sig->proj(0), dom}, codom, implicit));
+
+    w.log().i("clos_type of {}->{} is {}", dom, codom, sig);
+
+    return sig;
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
@@ -169,34 +161,30 @@ void ClosConv::rewrite_external(Def* old_mut) {
 // for example of Idx which is Nat -> *
 
 const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
-    log().d("rewriting imm pi {}", pi);
-    // return RWPhase::rewrite_imm_Pi(pi);
     auto& w = new_world();
 
     auto new_dom   = rewrite(pi->dom());
     auto new_codom = rewrite(pi->codom());
 
-    auto t1 = new_dom->type()->isa<Type>();
-    auto t2 = new_codom->type()->isa<Type>();
-    if (!t1 || !t2 || t1 != w.type() || t2 != w.type()) {
+    assert(new_codom);
+
+    // fall back if pi is not the type of a function
+    // TODO: idea is that pi is a function type if the domain and codomain have type *
+    auto t1 = new_dom->type();
+    auto t2 = new_codom->type();
+    if (!(t1 && t2 && t1 == w.type() && t2 == w.type())) {
         auto new_pi = w.pi(new_dom, new_codom, pi->is_implicit());
         log().d("rewritten imm pi {} to {}", pi, new_pi);
         return new_pi;
     }
 
     // abstract over the type of the environment
-    auto Tpi       = w.mut_pi(w.type<1>(), true)->set_dom(w.type());
-    auto T         = Tpi->var();
-    auto code_type = w.pi({T, rewrite(pi->dom())}, rewrite(pi->codom()), pi->is_implicit());
-    // TODO: get the closure type by a method from Stub to keep that stuff in one place
-    auto clos_type = w.sigma({code_type, T});
-    Tpi->set_codom(clos_type);
-    log().d("rewritten imm pi {} : {}  to  {} : {}", pi, pi->type(), Tpi, Tpi->type());
-    return Tpi;
+    auto clos_type = Stub::clos_type(new_dom, new_codom, pi->is_implicit());
+    log().d("rewritten imm pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
+    return clos_type;
 }
 
 const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
-    log().d("rewriting mut pi {}", pi);
     auto new_pi = RWPhase::rewrite_mut_Pi(pi);
     log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), new_pi, new_pi->type());
     return new_pi;
@@ -215,7 +203,7 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
         return w.app(new_callee, new_arg)->set(old_app->dbg_key());
     }
 
-    auto [code, env] = *clos;
+    auto [env, code] = *clos;
 
     log().d("detected application of closure with code={} environment={} and argument {}", code, env, new_arg);
 

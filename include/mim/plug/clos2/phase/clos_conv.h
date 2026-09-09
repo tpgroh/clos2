@@ -31,14 +31,13 @@ private:
         Lam* code;
 
         const Def* pack();
-        static std::optional<std::pair<const Lam*, const Def*>> isa_closure(const Def*);
-        // const Def* clos_type(const Def*, const Def*, const Def*); // TODO: implement
+        static std::optional<std::pair<const Def*, const Lam*>> isa_closure(const Def*);
+        static const Def* clos_type(const Def*, const Def*, bool);
     };
 
     const Stub& get_Stub(const Lam*);
     const Def* rewrite_body(Stub&, const Lam*);
 
-    bool analyze() final;
     void rewrite_external(Def*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
