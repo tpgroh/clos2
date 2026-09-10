@@ -35,7 +35,7 @@ lam extern _compile(): %compile.Phase =
         %compile.named "%clos2.clos_conv",
     );
 
-fun extern make_adder (n : I32) @ff : I32->I32 =
+fun extern make_adder (n : I32) : I32->I32 =
     lam add (x:I32) : I32 = %core.wrap.add 0 (x,n);
     return add;
 
@@ -44,7 +44,7 @@ fun extern count (n : I32) : I32 =
     where
         con loop (i acc : I32) =
             let cond = %core.icmp.ul (i, n);
-            %core.select (cond, body, exit) ()
+            (body, exit) # cond ()
             where
                 con body () =
                     let next = %core.wrap.add 0 (i, 1I32);

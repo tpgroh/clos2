@@ -27,12 +27,15 @@ private:
     struct Stub {
         DefVec fvs;
 
+        const Def* fn_type;
         const Def* env;
-        Lam* code;
+        Lam* procedure;
 
         const Def* pack();
-        static std::optional<std::pair<const Def*, const Lam*>> isa_closure(const Def*);
-        static const Def* clos_type(const Def*, const Def*, bool);
+        static std::tuple<const Def*, const Def*, const Lam*> unpack(const Tuple* tup);
+        static const Tuple* isa_closure(const Def*);
+        static const Def* clos_type(const Pi*);
+        static const Def* apply(const Tuple* clos, const Def* arg);
     };
 
     const Stub& get_Stub(const Lam*);

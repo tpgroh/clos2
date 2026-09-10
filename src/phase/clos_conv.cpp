@@ -2,6 +2,7 @@
 
 #include <format>
 #include <optional>
+#include <tuple>
 
 #include "mim/lattice.h"
 #include "mim/phase.h"
@@ -45,30 +46,34 @@ const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
 
     // create the code lam
     // TODO: for dependant types I'll have to make the codom to depend on the argument
-    auto dom      = rewrite(old_lam->type()->dom());
-    auto codom    = rewrite(old_lam->type()->codom());
+    auto dom   = rewrite(old_lam->type()->dom());
+    auto codom = rewrite(old_lam->type()->codom());
+    // TODO: I must create a mut_pi if the old_lam->type() is a mut pi
+    auto fn_type  = w.pi(dom, codom, old_lam->type()->is_implicit());
     auto env_type = environment->type(); // TODO: I think I want to use uniq at this point. but I didnt get that to work
-    auto code     = w.mut_lam({env_type, dom}, codom);
-    code->set(old_lam->dbg_key())->debug_prefix("closed_");
+    auto procedure = w.mut_lam(env_type, fn_type);
+    procedure->set(false, w.mut_lam(fn_type))->set(old_lam->dbg_key())->debug_prefix("procedure_");
 
     // put the stub in the closure list and insert the old_lam into the work list.
     // the body of code will be rewritten in finalize
     worklist_.emplace(old_lam);
-    closures_[old_lam] = {.fvs = fvs, .env = environment, .code = code};
+    closures_[old_lam] = {.fvs = fvs, .fn_type = fn_type, .env = environment, .procedure = procedure};
 
-    log().d("creation done. Code has type {}", code->type());
+    log().d("creation done. Code has type {}", procedure->type());
 
     return closures_[old_lam];
 }
 
 const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
-    auto& w   = new_world();
-    auto code = stub.code;
+    auto& w        = new_world();
+    auto procedure = stub.procedure;
+    auto fn_body   = procedure->body()->as_mut<Lam>();
 
     log().e("rewriting body for stub closure of {}", old_lam);
 
     // TODO: maybe there is something different if the old_lam is not mutable. I'll see when I get there
-    auto [env, arg] = code->vars<2>();
+    auto env = procedure->var();
+    auto arg = fn_body->var();
 
     push();
 
@@ -93,46 +98,61 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
     auto body   = rewrite(old_lam->body());
     log().d("rewrote filter to {}", filter);
     log().d("rewrote body to {} of type {}", body, body->type());
-    code->set(filter, body);
+    fn_body->set(filter, body);
 
     pop();
 
-    return code;
+    return procedure;
 }
 
 const Def* ClosConv::Stub::pack() {
-    auto& w = code->world();
+    auto& w = procedure->world();
 
     // TODO: use Sigma with named fields
     // @see also TODO in isa_closure
 
-    auto clos = w.tuple({env, code})->as<Tuple>()->set("closure");
+    auto clos = w.tuple({env->type(), env, procedure})->as<Tuple>()->set("closure");
     w.log().i("packed closure  {}", clos);
     return clos;
 }
 
-std::optional<std::pair<const Def*, const Lam*>> ClosConv::Stub::isa_closure(const Def* def) {
-    // TODO: use Sigma with named fields
-    auto tup = def->isa_imm<Tuple>();
-    if (!tup) return {};
-    auto pair = std::pair{tup->proj(2, 0), tup->proj(2, 1)->as<Lam>()};
-    tup->world().log().i("unpacked closure {{.env={}, .code={}}}", pair.first, pair.second);
-    return pair;
+std::tuple<const Def*, const Def*, const Lam*> ClosConv::Stub::unpack(const Tuple* tup) {
+    auto [env_type, env, procedure] = tup->projs<3>();
+    return {env_type, env, procedure->as_mut<Lam>()};
 }
 
-const Def* ClosConv::Stub::clos_type(const Def* dom, const Def* codom, bool implicit) {
-    auto& w  = dom->world();
-    auto sig = w.mut_sigma(2);
+const Tuple* ClosConv::Stub::isa_closure(const Def* def) {
+    auto clos = def->isa_imm<Tuple>();
+    return clos && clos->num_projs() == 3 ? clos : nullptr;
+}
+
+const Def* ClosConv::Stub::clos_type(const Pi* fn_type) {
+    auto& w  = fn_type->world();
+    auto sig = w.mut_sigma(3);
+    w.log().d("calculate closure type of {}", fn_type);
 
     // keep the env type abstract of type *
     sig->set(0, w.type());
+    auto T = sig->var(0);
 
-    // code type
-    sig->set(1, w.pi({sig->proj(0), dom}, codom, implicit));
+    // env of type T
+    sig->set(1, T);
 
-    w.log().i("clos_type of {}->{} is {}", dom, codom, sig);
+    // procedure type
+    auto procedure_type = w.pi(T, fn_type);
+    sig->set(2, procedure_type);
+
+    w.log().i("clos_type of {} is {}", fn_type, sig);
 
     return sig;
+}
+
+const Def* ClosConv::Stub::apply(const Tuple* clos, const Def* arg) {
+    auto& w = clos->world();
+
+    auto [_, env, procedure] = unpack(clos);
+
+    return w.app(w.app(procedure, env), arg);
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
@@ -152,7 +172,7 @@ const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
 void ClosConv::rewrite_external(Def* old_mut) {
     log().i("rewrite external {}", old_mut);
     auto new_def = rewrite_root(old_mut);
-    if (auto clos = Stub::isa_closure(new_def)) return; // TODO: externalize the code lambda from the closure
+    if (Stub::isa_closure(new_def)) return; // TODO: externalize the code lambda from the closure
 
     if (old_mut->is_external()) new_def->as_mut()->externalize();
 }
@@ -179,7 +199,8 @@ const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
     }
 
     // abstract over the type of the environment
-    auto clos_type = Stub::clos_type(new_dom, new_codom, pi->is_implicit());
+    auto fn_type   = w.pi(new_dom, new_codom, pi->is_implicit());
+    auto clos_type = Stub::clos_type(fn_type);
     log().d("rewritten imm pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
     return clos_type;
 }
@@ -203,15 +224,14 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
         return w.app(new_callee, new_arg)->set(old_app->dbg_key());
     }
 
-    auto [env, code] = *clos;
+    log().d("detected application of closure {} with arg {}", clos, new_arg);
 
-    log().d("detected application of closure with code={} environment={} and argument {}", code, env, new_arg);
-
-    return w.app(code, {env, new_arg});
+    return Stub::apply(clos, new_arg);
 }
 
 void ClosConv::finalize() {
     log().i("finalize()");
+    new_world().dot("before_crash.dot");
     while (!worklist_.empty()) {
         auto old_lam = worklist_.front();
         worklist_.pop();
