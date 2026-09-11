@@ -1,7 +1,6 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
 #include <format>
-#include <optional>
 #include <tuple>
 
 #include "mim/lattice.h"
@@ -19,10 +18,22 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
+/// TODO: this analysis is currently not used. I'm just using it to dump the old_world just before the start of this
+/// Phase. this is needed because previously Phases already rewrite the world and thus the names from the dump before
+/// world::optimize() are no longer correct
+bool ClosConv::analyze() {
+    auto& w = old_world();
+
+    w.dump();
+    w.dot("middle.dot", {.all_annexes = true});
+
+    return false;
+}
+
+const ClosConv::Stub* ClosConv::get_Stub(const Lam* old_lam) {
     if (auto it = closures_.find(old_lam); it != closures_.end()) {
         log().d("reuse stub for {}", old_lam);
-        return it->second;
+        return &it->second;
     }
 
     log().d("creating stub for {}", old_lam);
@@ -61,7 +72,7 @@ const ClosConv::Stub& ClosConv::get_Stub(const Lam* old_lam) {
 
     log().d("creation done. Code has type {}", procedure->type());
 
-    return closures_[old_lam];
+    return &closures_[old_lam];
 }
 
 const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
@@ -100,30 +111,38 @@ const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
     log().d("rewrote body to {} of type {}", body, body->type());
     fn_body->set(filter, body);
 
+    // TODO: externalize procedure
+    // currently I cannot do that in every case. in the clos2-example I have to pack the closure of loop into the
+    // environment of body. in general I dont want to closure convert this but keep it as a loop. llvm understand free
+    // vars in loops. thus I use this workaround for now.
+    // NOTE: I still have do decide how I want to do recursion and mutual recusion for closure procedures...
+    log().d("procedure is extern : {} ; fvs : {}", procedure->is_external(), procedure->free_vars());
+    if (procedure->free_vars().empty()) procedure->externalize();
+
     pop();
 
     return procedure;
 }
 
-const Def* ClosConv::Stub::pack() {
+const Def* ClosConv::Stub::pack() const {
     auto& w = procedure->world();
-
-    // TODO: use Sigma with named fields
-    // @see also TODO in isa_closure
 
     auto clos = w.tuple({env->type(), env, procedure})->as<Tuple>()->set("closure");
     w.log().i("packed closure  {}", clos);
     return clos;
 }
 
-std::tuple<const Def*, const Def*, const Lam*> ClosConv::Stub::unpack(const Tuple* tup) {
+std::tuple<const Def*, const Def*, const Def*> ClosConv::Stub::unpack(const Def* tup) {
     auto [env_type, env, procedure] = tup->projs<3>();
-    return {env_type, env, procedure->as_mut<Lam>()};
+    return {env_type, env, procedure}; // TODO: I actually expect procedure to be a mut Lam, because I'm currently
+                                       // rewriting the return continuations I cannot do that.
 }
 
-const Tuple* ClosConv::Stub::isa_closure(const Def* def) {
-    auto clos = def->isa_imm<Tuple>();
-    return clos && clos->num_projs() == 3 ? clos : nullptr;
+// TODO: write an actual check
+const Def* ClosConv::Stub::isa_closure(const Def* def) {
+    if (def->isa<Tuple>()) return def;
+    if (def->type()->isa_mut<Sigma>()) return def;
+    return nullptr;
 }
 
 const Def* ClosConv::Stub::clos_type(const Pi* fn_type) {
@@ -147,7 +166,7 @@ const Def* ClosConv::Stub::clos_type(const Pi* fn_type) {
     return sig;
 }
 
-const Def* ClosConv::Stub::apply(const Tuple* clos, const Def* arg) {
+const Def* ClosConv::Stub::apply(const Def* clos, const Def* arg) {
     auto& w = clos->world();
 
     auto [_, env, procedure] = unpack(clos);
@@ -155,18 +174,16 @@ const Def* ClosConv::Stub::apply(const Tuple* clos, const Def* arg) {
     return w.app(w.app(procedure, env), arg);
 }
 
-const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    // create stub and return the closure.
-    log().i("closure convert imm lam {}", old_lam);
-    auto stub = get_Stub(old_lam);
-    return map(old_lam, stub.pack());
-}
+const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) { return RWPhase::rewrite_imm_Lam(old_lam); } // TODO: delete
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
+    if (!Lam::isa_cn(old_lam)) return RWPhase::rewrite_mut_Lam(old_lam);
+
     // create stub and return the closure.
-    log().i("closure convert mut lam {}", old_lam);
     auto stub = get_Stub(old_lam);
-    return map(old_lam, stub.pack());
+    assert(stub);
+    log().i("closure convert mut lam {}", old_lam);
+    return map(old_lam, stub->pack());
 }
 
 void ClosConv::rewrite_external(Def* old_mut) {
@@ -181,34 +198,27 @@ void ClosConv::rewrite_external(Def* old_mut) {
 // for example of Idx which is Nat -> *
 
 const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
-    auto& w = new_world();
-
-    auto new_dom   = rewrite(pi->dom());
-    auto new_codom = rewrite(pi->codom());
-
-    assert(new_codom);
-
-    // fall back if pi is not the type of a function
-    // TODO: idea is that pi is a function type if the domain and codomain have type *
-    auto t1 = new_dom->type();
-    auto t2 = new_codom->type();
-    if (!(t1 && t2 && t1 == w.type() && t2 == w.type())) {
-        auto new_pi = w.pi(new_dom, new_codom, pi->is_implicit());
-        log().d("rewritten imm pi {} to {}", pi, new_pi);
-        return new_pi;
+    if (!Pi::isa_cn(pi)) {
+        log().d("imm Pi {} is not a continuation", pi);
+        return RWPhase::rewrite_imm_Pi(pi);
     }
 
-    // abstract over the type of the environment
-    auto fn_type   = w.pi(new_dom, new_codom, pi->is_implicit());
-    auto clos_type = Stub::clos_type(fn_type);
-    log().d("rewritten imm pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
+    auto new_pi    = RWPhase::rewrite_imm_Pi(pi)->as<Pi>();
+    auto clos_type = Stub::clos_type(new_pi);
+    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
     return clos_type;
 }
 
 const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
-    auto new_pi = RWPhase::rewrite_mut_Pi(pi);
-    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), new_pi, new_pi->type());
-    return new_pi;
+    if (!Pi::isa_cn(pi)) {
+        log().d("mut Pi {} is not a continuation", pi);
+        return RWPhase::rewrite_mut_Pi(pi);
+    }
+
+    auto new_pi    = RWPhase::rewrite_mut_Pi(pi)->as<Pi>();
+    auto clos_type = Stub::clos_type(new_pi);
+    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
+    return clos_type;
 }
 
 // enforce closure calling convention
@@ -219,8 +229,8 @@ const Def* ClosConv::rewrite_imm_App(const App* old_app) {
 
     auto clos = Stub::isa_closure(new_callee);
     if (!clos) {
-        log().d("the callee was not detected as a closure. old_app:{}, new_callee:{}, new_arg:{}", old_app, new_callee,
-                new_arg);
+        log().d("the callee was not detected as a closure. old_app:{}, new_callee {}:{}, new_arg {}:{}", old_app,
+                new_callee, new_callee->type(), new_arg, new_arg->type());
         return w.app(new_callee, new_arg)->set(old_app->dbg_key());
     }
 

@@ -1,7 +1,5 @@
 #pragma once
-#include <optional>
 #include <queue>
-#include <utility>
 
 #include "mim/def.h"
 #include "mim/lam.h"
@@ -31,16 +29,17 @@ private:
         const Def* env;
         Lam* procedure;
 
-        const Def* pack();
-        static std::tuple<const Def*, const Def*, const Lam*> unpack(const Tuple* tup);
-        static const Tuple* isa_closure(const Def*);
+        const Def* pack() const;
+        static std::tuple<const Def*, const Def*, const Def*> unpack(const Def*);
+        static const Def* isa_closure(const Def*);
         static const Def* clos_type(const Pi*);
-        static const Def* apply(const Tuple* clos, const Def* arg);
+        static const Def* apply(const Def*, const Def*);
     };
 
-    const Stub& get_Stub(const Lam*);
+    const Stub* get_Stub(const Lam*);
     const Def* rewrite_body(Stub&, const Lam*);
 
+    bool analyze() final;
     void rewrite_external(Def*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
