@@ -19,52 +19,11 @@ bool ClosConv::analyze() {
     return false;
 }
 
-// (Lam x : A . e)+    :=    (procedure, env)
-// where procedure  =  Lam (n:Sigma (free vars of e and A)) (x : let [x_i...] = n in (A)+)   . let [x_i...] = n in (e)+
-// where env        =  [x_i...]
-// TODO: for now I will also pack the type of the environment into the closure.
-// I have to think about how I can remove that
-// TODO: I'm using a curried application of the procedure with the env given by the CC-CC to CC translation (M-CLO)
-//
+// create fn type
+const Pi* ClosConv::create_fn_type(const Pi* old_lam_type, const DefVec& old_fvs, const Def* n) {
+    auto& w = n->world();
 
-const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
-    // log().d("closure converting {}", old_lam); // TODO: remove debug log
-    auto& w = new_world();
-
-    // get free vars
-    auto fvs_set = fvana_.free_vars(old_lam);
-
-    // log().d("CC {} free vars {}", old_lam, fvs_set); // TODO: remove debug log
-
-    // construct environment
-    DefVec old_fvs{fvs_set.begin(), fvs_set.end()};
-    DefVec new_fvs;
-    new_fvs.reserve(old_fvs.size());
-    for (size_t i = 0; i < old_fvs.size(); i++)
-        new_fvs.push_back(rewrite(old_fvs[i])->set<true>(old_fvs[i]->dbg_key())->debug_prefix("environment_"));
-    const Def* environment = w.tuple(new_fvs);
-    if (old_fvs.size() > 1) environment->debug_prefix("environment_");
-
-    // log().d("CC {} environemt {} of type {}", old_lam, environment, environment->type()); // TODO: remove debug log
-
-    // create new scope to prevent leaking the environment
     push();
-
-    // create procedure type
-    auto env_type     = environment->type();
-    auto old_lam_type = old_lam->type();
-
-    // create fn type
-    // NOTE: I'm using umax to find the right universe level on which this pi has to live.
-    // I'm quite sure that it has to live one universe above env_type and old_lam_type,
-    // TODO: I have to check that
-    // BUG: the rewrite of old_lam_type leaks environemnt. thus I do that in a new scope to clean that up.
-    // if possible I should do this any other way... for example get the universe level and rewrite that.
-    push();
-    auto p_pi = w.mut_pi(w.umax<UMax::Type>(Defs{env_type, rewrite(old_lam_type)}), false);
-    pop();
-    p_pi->set_dom(env_type);
-    auto n = p_pi->var();
 
     // rewrite domain A with let [x_i...] = n in A
     if (old_fvs.size() == 1) {
@@ -102,16 +61,64 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
 
     // log().d("CC {} final fn Pi is {} was {}", old_lam, fn_pi, old_lam_type); // TODO: remove debug log
 
-    // set codomain of procedure's pi
-    p_pi->set_codom(fn_pi);
+    pop();
+
+    return fn_pi;
+}
+
+// (Lam x : A . e)+    :=    (procedure, env)
+// where procedure  =  Lam (n:Sigma (free vars of e and A)) (x : let [x_i...] = n in (A)+)   . let [x_i...] = n in (e)+
+// where env        =  [x_i...]
+// TODO: for now I will also pack the type of the environment into the closure.
+// I have to think about how I can remove that
+// TODO: I'm using a curried application of the procedure with the env given by the CC-CC to CC translation (M-CLO)
+//
+
+const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
+    // log().d("closure converting {}", old_lam); // TODO: remove debug log
+    auto& w = new_world();
+
+    // get free vars
+    auto fvs_set = fvana_.free_vars(old_lam);
+
+    // log().d("CC {} free vars {}", old_lam, fvs_set); // TODO: remove debug log
+
+    // construct environment
+    DefVec old_fvs{fvs_set.begin(), fvs_set.end()};
+    DefVec new_fvs;
+    new_fvs.reserve(old_fvs.size());
+    for (size_t i = 0; i < old_fvs.size(); i++)
+        new_fvs.push_back(rewrite(old_fvs[i])->set<true>(old_fvs[i]->dbg_key())->debug_prefix("environment_"));
+    const Def* environment = w.tuple(new_fvs);
+    if (old_fvs.size() > 1) environment->debug_prefix("environment_");
+
+    // log().d("CC {} environemt {} of type {}", old_lam, environment, environment->type()); // TODO: remove debug log
+
+    // create procedure type
+    auto env_type     = environment->type();
+    auto old_lam_type = old_lam->type();
+
+    // NOTE: I'm using umax to find the right universe level on which this pi has to live.
+    // I'm quite sure that it has to live one universe above env_type and old_lam_type,
+    // TODO: I have to check that
+    // BUG: the rewrite of old_lam_type leaks environemnt. thus I do that in a new scope to clean that up.
+    // if possible I should do this any other way... for example get the universe level and rewrite that.
+    push();
+    auto p_pi_type = w.umax<UMax::Type>(Defs{env_type, rewrite(old_lam_type)});
+    pop();
+
+    // create procedure type
+    auto p_pi = w.mut_pi(p_pi_type, false);
+    p_pi->set_dom(env_type);
+    p_pi->set_codom(create_fn_type(old_lam_type, old_fvs, p_pi->var()));
 
     // log().d("CC {} final procedure Pi is {}", old_lam, p_pi); // TODO: remove debug log
 
     // setup the outer lambda
+    // BUG: if old_lam was immutable, does the inner lambda also have to be immutable?
+    // or is it OK to use mut_lam.
     auto procedure = w.mut_lam(p_pi);
-    auto fn        = w.mut_lam(fn_pi); // BUG: does this keep right if old_lam is immutable? I would think so.
-                                       // I think of a imm Lam as a mut Lam which gets an empty tuple ()
-                                       // and the var() is never used
+    auto fn        = w.mut_lam(create_fn_type(old_lam_type, old_fvs, procedure->var()));
     procedure->set(old_lam->dbg_key())->debug_prefix("procedure_");
     fn->set(old_lam->dbg_key())->debug_prefix("fn_");
     auto env = procedure->var()->set("env");
@@ -120,10 +127,7 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
 
     // log().d("CC {} rewrite body {}", old_lam, old_lam->body()); // TODO: remove debug log
 
-    // cleanup env
-    // BUG: I think that if I do everything right this should not be needed. but to make sure that I dont leak
-    // environment in any way I'll keep it for now
-    pop();
+    // create new environment to prevent leaking stuff
     push();
 
     // setup the inner lambda
@@ -148,9 +152,10 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
     pop();
 
     // BUG: every procedure should be closed.
+    // this is currently not the case. I will create GitLab issues for those that I can think of which dont get closed
     if (!procedure->is_closed()) {
         log().e("CC {} procedure {} is not closed, free_vars {}", old_lam, procedure, procedure->free_vars());
-        procedure->dot(std::format("dot/{}.dot", procedure->sym()));
+        procedure->dot(std::format("dot/{}.dot", procedure->sym()), {.follow_types = true});
     }
 
     // use partial application with @ff filter to delay it
@@ -166,13 +171,9 @@ void ClosConv::rewrite_external(Def* old_mut) {
 
     if (auto app = new_def->isa_imm<App>()) {
         auto proc = app->callee();
-        log().e("procedure {} is closed {}, free vars {}", proc, proc->is_closed(), proc->free_vars());
         proc->as_mut()->externalize();
     } else
         new_def->as_mut()->externalize();
-
-    // BUG: I still need to externalize, but not the closures because they are not mutable thus cannot be externalized
-    return;
 }
 
 // (Pi _ : A . B)+   :=   Pi _ : (A)+ . (B)+

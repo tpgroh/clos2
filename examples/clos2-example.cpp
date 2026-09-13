@@ -66,6 +66,11 @@ fun extern count (n : I32) : I32 =
             end;
     end;
 */
+
+// main function for testing compiled result
+fun extern main(mem:%mem.M 0, argc: I32, argv: %mem.Ptr0 (%mem.Ptr0 I8)): [%mem.M 0, I32] =
+    ret a = foo $ ();
+    return (mem, a);
 )";
 
 /* what I think the result should be
