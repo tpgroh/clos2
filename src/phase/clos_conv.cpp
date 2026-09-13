@@ -105,27 +105,35 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
     // BUG: if old_lam was immutable, does the inner lambda also have to be immutable?
     // or is it OK to use mut_lam.
     auto procedure = w.mut_lam(p_pi);
-    auto fn        = w.mut_lam(create_fn_type(old_lam_type, old_fvs, procedure->var()));
     procedure->set(old_lam->dbg_key())->debug_prefix("procedure_");
     auto env = procedure->var()->set("env");
-    auto arg = fn->var()->set("arg");
-    procedure->set(false, fn);
+    const Lam* fn;
+    const Pi* fn_pi = create_fn_type(old_lam_type, old_fvs, procedure->var());
+    if (old_lam->is_mutable()) {
+        fn = w.mut_lam(fn_pi);
+        procedure->set(false, fn);
+    }
 
     // create new environment to prevent leaking stuff
     push();
 
     // setup the inner lambda
     if (old_fvs.size() == 1)
-        map(old_fvs[0], env);
+        map(old_fvs[0], env); // TODO: add set dbk_key?
     else
         for (size_t i = 0; i < old_fvs.size(); i++)
             map(old_fvs[i], env->proj(i)->set(std::format("env_ext_{}", i)));
-    if (auto mut = old_lam->isa_mut<Lam>()) map(mut->var(), arg);
+    if (auto mut = old_lam->isa_mut<Lam>()) map(mut->var(), fn->as_mut<Lam>()->var()->set("arg"));
 
     // now rewrite the body
     auto body   = rewrite(old_lam->body());
     auto filter = rewrite(old_lam->filter());
-    fn->set(filter, body);
+    if (old_lam->is_mutable())
+        fn->as_mut<Lam>()->set(filter, body);
+    else {
+        fn = w.lam(fn_pi, filter, body);
+        procedure->set(false, fn);
+    }
 
     // cleanup the environment to prevent leaking stuff
     pop();
