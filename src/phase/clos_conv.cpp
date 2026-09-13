@@ -11,10 +11,10 @@ using namespace mim::plug;
 using namespace mim::plug::clos2;
 
 bool ClosConv::analyze() {
-    auto& w = old_world();
+    // auto& w = old_world();
 
-    w.dump();
-    w.dot("middle.dot", {.all_annexes = true});
+    // w.dump();
+    // w.dot("middle.dot", {.all_annexes = true});
 
     return false;
 }
@@ -162,8 +162,19 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
     return map(old_lam, w.app(procedure, environment));
 }
 
-const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) { return rewrite_lam_to_clos(old_lam); }
-const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) { return rewrite_lam_to_clos(old_lam); }
+const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
+    // BUG: hotfix
+    // if (old_lam->sym() == "main") return RWPhase::rewrite_imm_Lam(old_lam);
+
+    return rewrite_lam_to_clos(old_lam);
+}
+
+const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
+    // BUG: hotfix
+    // if (old_lam->sym() == "main") return RWPhase::rewrite_mut_Lam(old_lam);
+
+    return rewrite_lam_to_clos(old_lam);
+}
 
 void ClosConv::rewrite_external(Def* old_mut) {
     log().i("rewrite external {}", old_mut);

@@ -9,8 +9,9 @@
 /// ## Dependencies
 ///
 plugin core;
+import compile;
 ///
 /// ## Operations
 ///
 /// ## Phases
-axm %clos2.clos_conv: %compile.Phase;
+axm clos_conv: compile.Phase;
