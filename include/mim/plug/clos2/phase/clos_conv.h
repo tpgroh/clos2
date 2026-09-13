@@ -1,11 +1,9 @@
 #pragma once
-#include <queue>
 
 #include "mim/def.h"
 #include "mim/lam.h"
 #include "mim/phase.h"
 
-#include "mim/util/gid.h"
 #include "mim/util/types.h"
 
 #include "mim/plug/clos2/fv.h"
