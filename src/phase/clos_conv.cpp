@@ -1,26 +1,15 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
 #include <format>
-#include <tuple>
 
+#include "mim/def.h"
 #include "mim/lattice.h"
 #include "mim/phase.h"
-#include "mim/tuple.h"
-
-// TODO: in the creation of a recursive closure I'm currently messing up.
-// I want to overwrite the rewrite_*_Lam methods to directly overwrite the lam 'allocation' with the closure.
-// for that to work I have to take a look at code_body's creation. there I dont want to just place down the closure.
-// instead I want to do the rewrite_*_Lam method from RWPhase. (for some reason that didn't work before. maybe now
-// because I'm smarter...) then rewrite_imm_App just has to enforce the calling convetion of closures instead of also
-// creating them.
 
 using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-/// TODO: this analysis is currently not used. I'm just using it to dump the old_world just before the start of this
-/// Phase. this is needed because previously Phases already rewrite the world and thus the names from the dump before
-/// world::optimize() are no longer correct
 bool ClosConv::analyze() {
     auto& w = old_world();
 
@@ -30,227 +19,142 @@ bool ClosConv::analyze() {
     return false;
 }
 
-const ClosConv::Stub* ClosConv::get_Stub(const Lam* old_lam) {
-    if (auto it = closures_.find(old_lam); it != closures_.end()) {
-        log().d("reuse stub for {}", old_lam);
-        return &it->second;
-    }
+// (Lam x : A . e)+    :=    (procedure, env)
+// where procedure  =  Lam (n:Sigma (free vars of e and A)) (x : let [x_i...] = n in (A)+)   . let [x_i...] = n in (e)+
+// where env        =  [x_i...]
+// TODO: for now I will also pack the type of the environment into the closure.
+// I have to think about how I can remove that
+// TODO: I'm using a curried application of the procedure with the env given by the CC-CC to CC translation (M-CLO)
+//
 
-    log().d("creating stub for {}", old_lam);
+const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
+    log().d("closure converting {}", old_lam);
+    auto& w = new_world();
 
-    // get the free vars
-    auto fvset = fvana_.free_vars(old_lam); // TODO: we can skip if old_lam->is_closed()
-    log().d("free vars of {} are {} vs {}", old_lam, fvset, old_lam->free_vars());
-    DefVec fvs{fvset.begin(), fvset.end()};
-    DefVec new_fvs{};
-    new_fvs.reserve(fvs.size());
-    for (auto v : fvs)
-        new_fvs.emplace_back(rewrite(v)->set(v->dbg_key()));
+    // get free vars
+    auto fvs_set = fvana_.free_vars(old_lam);
 
-    // create the environment
-    // NOTE: we create the environment as a singleton to enforce the requirement:
-    // the code procedure gets exactly the environment which was created for it
-    auto& w          = new_world();
-    auto environment = w.tuple(new_fvs)->set(old_lam->dbg_key())->debug_prefix("environment_");
+    log().d("CC {} free vars {}", old_lam, fvs_set);
 
-    log().d("created environment {}. Now creating code lambda", environment);
+    // construct environment
+    DefVec old_fvs{fvs_set.begin(), fvs_set.end()};
+    DefVec new_fvs;
+    new_fvs.reserve(old_fvs.size());
+    for (size_t i = 0; i < old_fvs.size(); i++)
+        new_fvs.push_back(rewrite(old_fvs[i])->set<true>(old_fvs[i]->dbg_key())->debug_prefix("environment_"));
+    const Def* environment = w.tuple(new_fvs);
+    if (old_fvs.size() > 1) environment->debug_prefix("environment_");
 
-    // create the code lam
-    // TODO: for dependant types I'll have to make the codom to depend on the argument
-    auto dom   = rewrite(old_lam->type()->dom());
-    auto codom = rewrite(old_lam->type()->codom());
-    // TODO: I must create a mut_pi if the old_lam->type() is a mut pi
-    auto fn_type  = w.pi(dom, codom, old_lam->type()->is_implicit());
-    auto env_type = environment->type(); // TODO: I think I want to use uniq at this point. but I didnt get that to work
-    auto procedure = w.mut_lam(env_type, fn_type);
-    procedure->set(false, w.mut_lam(fn_type))->set(old_lam->dbg_key())->debug_prefix("procedure_");
+    log().d("CC {} environemt {} of type {}", old_lam, environment, environment->type());
 
-    // put the stub in the closure list and insert the old_lam into the work list.
-    // the body of code will be rewritten in finalize
-    worklist_.emplace(old_lam);
-    closures_[old_lam] = {.fvs = fvs, .fn_type = fn_type, .env = environment, .procedure = procedure};
-
-    log().d("creation done. Code has type {}", procedure->type());
-
-    return &closures_[old_lam];
-}
-
-const Def* ClosConv::rewrite_body(ClosConv::Stub& stub, const Lam* old_lam) {
-    auto& w        = new_world();
-    auto procedure = stub.procedure;
-    auto fn_body   = procedure->body()->as_mut<Lam>();
-
-    log().e("rewriting body for stub closure of {}", old_lam);
-
-    // TODO: maybe there is something different if the old_lam is not mutable. I'll see when I get there
-    auto env = procedure->var();
-    auto arg = fn_body->var();
-
+    // create new scope to prevent leaking the environment
     push();
 
-    // mapping free vars to extractions of env
-    if (stub.fvs.size() == 1) {
-        log().d("mapping single free var directly to env");
-        map(stub.fvs[0], env);
-    } else
-        for (size_t i = 0; i < stub.fvs.size(); i++) {
-            auto v = stub.fvs[i];
-            auto e = w.extract(env, i)->set(v->dbg_key())->debug_prefix(std::format("env_ext_{}_", i));
-            log().d("mapping {} to env#{}", v, i);
-            map(v, e);
-        }
-    if (auto v = old_lam->has_var()) {
-        log().d("mapping argument of old_lam to arg");
-        map(v, arg);
+    // create procedure type
+    auto env_type     = environment->type();
+    auto old_lam_type = old_lam->type();
+
+    // BUG: old_lam->type()->type() might be wrong.
+    // but it can be on universe levell 0 or 1.
+    // it should be decidable based on old_lam alone
+    // log().d("umax of {}, {} is {}", env_type, rewrite(old_lam_type),
+    //         w.umax<UMax::Type>(Defs{env_type, rewrite(old_lam_type)}));
+    auto p_pi = w.mut_pi(w.umax<UMax::Type>(Defs{env_type, rewrite(old_lam_type)}), false);
+    p_pi->set_dom(env_type);
+    auto n = p_pi->var();
+
+    // rewrite domain A with let [x_i...] = n in A
+    if (old_fvs.size() == 1)
+        map(old_fvs[0], n->set(old_fvs[0]->dbg_key())->debug_prefix("env_"));
+    else
+        for (size_t i = 0; i < old_fvs.size(); i++)
+            map(old_fvs[i], n->proj(i)->set(old_fvs[i]->dbg_key())->debug_prefix(std::format("env_ext_{}_", i)));
+    auto new_dom = rewrite(old_lam_type->dom());
+
+    log().d("CC {} fn dom is {}", old_lam, new_dom);
+
+    // rewrite codomain B with let [x_i...] = n in B while allowing B to depend on A and construct the possbily mutable
+    // pi
+    const Pi* fn_type;
+    if (auto old_pi = old_lam_type->isa_mut<Pi>()) {
+        auto pi = w.mut_pi(rewrite(old_pi->type()), old_pi->is_implicit());
+        pi->set_dom(new_dom);
+        map(old_pi->var(), pi->var()); // B might depend on x
+        auto new_codom = rewrite(old_lam_type->codom());
+        pi->set_codom(new_codom);
+
+        fn_type = pi;
+    } else {
+        auto new_codom = rewrite(old_lam_type->codom());
+
+        fn_type = w.pi(new_dom, new_codom, old_lam_type->is_implicit());
     }
 
-    // rewrite code
-    auto filter = rewrite(old_lam->filter());
+    log().d("CC {} final fn Pi is {}", old_lam, fn_type);
+
+    // set codomain of procedure's pi
+    p_pi->set_codom(fn_type);
+
+    log().d("CC {} final procedure Pi is {}", old_lam, p_pi);
+
+    // setup the outer lambda
+    auto procedure = w.mut_lam(p_pi);
+    auto fn        = w.mut_lam(fn_type); // BUG: does this keep right if old_lam is immutable? I would think so.
+                                         // I think of a imm Lam as a mut Lam which gets an empty tuple ()
+                                         // and the var() is never used
+    procedure->set(old_lam->dbg_key())->debug_prefix("procedure_");
+    fn->set(old_lam->dbg_key())->debug_prefix("fn_");
+    auto env = procedure->var()->set("env");
+    auto arg = fn->var()->set("arg");
+    procedure->set(false, fn);
+
+    log().d("CC {} rewrite body {}", old_lam, old_lam->body());
+
+    // cleanup env
+    pop();
+    push();
+
+    // setup the inner lambda
+    if (old_fvs.size() == 1)
+        map(old_fvs[0], env);
+    else
+        for (size_t i = 0; i < old_fvs.size(); i++)
+            map(old_fvs[i], env->proj(i)->set(std::format("env_ext_{}", i)));
+    if (auto mut = old_lam->isa_mut<Lam>()) map(mut->var(), arg);
+
+    // now rewrite the body
     auto body   = rewrite(old_lam->body());
-    log().d("rewrote filter to {}", filter);
-    log().d("rewrote body to {} of type {}", body, body->type());
-    fn_body->set(filter, body);
+    auto filter = rewrite(old_lam->filter());
 
-    // TODO: externalize procedure
-    // currently I cannot do that in every case. in the clos2-example I have to pack the closure of loop into the
-    // environment of body. in general I dont want to closure convert this but keep it as a loop. llvm understand free
-    // vars in loops. thus I use this workaround for now.
-    // NOTE: I still have do decide how I want to do recursion and mutual recusion for closure procedures...
-    log().d("procedure is extern : {} ; fvs : {}", procedure->is_external(), procedure->free_vars());
-    if (procedure->free_vars().empty()) procedure->externalize();
+    log().d("CC {} set body to {} of type {}", old_lam, body, body->type());
+    log().d("CC {} set filter to {}", old_lam, filter);
+    fn->set(filter, body);
 
+    log().d("CC {} fn was set to {}", old_lam, fn->body());
+
+    // cleanup the environment to prevent leaking stuff
     pop();
 
-    return procedure;
+    // use partial application with @ff filter to delay it
+    return map(old_lam, w.app(procedure, environment));
 }
 
-const Def* ClosConv::Stub::pack() const {
-    auto& w = procedure->world();
-
-    auto clos = w.tuple({env->type(), env, procedure})->as<Tuple>()->set("closure");
-    w.log().i("packed closure  {}", clos);
-    return clos;
-}
-
-std::tuple<const Def*, const Def*, const Def*> ClosConv::Stub::unpack(const Def* tup) {
-    auto [env_type, env, procedure] = tup->projs<3>();
-    return {env_type, env, procedure}; // TODO: I actually expect procedure to be a mut Lam, because I'm currently
-                                       // rewriting the return continuations I cannot do that.
-}
-
-// TODO: write an actual check
-const Def* ClosConv::Stub::isa_closure(const Def* def) {
-    if (def->isa<Tuple>()) return def;
-    if (def->type()->isa_mut<Sigma>()) return def;
-    return nullptr;
-}
-
-const Def* ClosConv::Stub::clos_type(const Pi* fn_type) {
-    auto& w  = fn_type->world();
-    auto sig = w.mut_sigma(3);
-    w.log().d("calculate closure type of {}", fn_type);
-
-    // keep the env type abstract of type *
-    sig->set(0, w.type());
-    auto T = sig->var(0);
-
-    // env of type T
-    sig->set(1, T);
-
-    // procedure type
-    auto procedure_type = w.pi(T, fn_type);
-    sig->set(2, procedure_type);
-
-    w.log().i("clos_type of {} is {}", fn_type, sig);
-
-    return sig;
-}
-
-const Def* ClosConv::Stub::apply(const Def* clos, const Def* arg) {
-    auto& w = clos->world();
-
-    auto [_, env, procedure] = unpack(clos);
-
-    return w.app(w.app(procedure, env), arg);
-}
-
-const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) { return RWPhase::rewrite_imm_Lam(old_lam); } // TODO: delete
-
-const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    if (!Lam::isa_cn(old_lam)) return RWPhase::rewrite_mut_Lam(old_lam);
-
-    // create stub and return the closure.
-    auto stub = get_Stub(old_lam);
-    assert(stub);
-    log().i("closure convert mut lam {}", old_lam);
-    return map(old_lam, stub->pack());
-}
+const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) { return rewrite_lam_to_clos(old_lam); }
+const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) { return rewrite_lam_to_clos(old_lam); }
 
 void ClosConv::rewrite_external(Def* old_mut) {
     log().i("rewrite external {}", old_mut);
-    auto new_def = rewrite_root(old_mut);
-    if (Stub::isa_closure(new_def)) return; // TODO: externalize the code lambda from the closure
+    rewrite_root(old_mut);
 
-    if (old_mut->is_external()) new_def->as_mut()->externalize();
+    // BUG: I still need to externalize, but not the closures because they are not mutable thus cannot be externalized
+    return;
 }
 
-// BUG: I think I dont want to rewrite dependent types...
-// for example of Idx which is Nat -> *
+// (Pi _ : A . B)+   :=   Pi _ : (A)+ . (B)+
+const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) { return RWPhase::rewrite_imm_Pi(pi); }
 
-const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
-    if (!Pi::isa_cn(pi)) {
-        log().d("imm Pi {} is not a continuation", pi);
-        return RWPhase::rewrite_imm_Pi(pi);
-    }
+// (Pi x : A . B)+   :=   Pi x : (A)+ . (B)+
+const Def* ClosConv::rewrite_mut_Pi(Pi* pi) { return RWPhase::rewrite_mut_Pi(pi); }
 
-    auto new_pi    = RWPhase::rewrite_imm_Pi(pi)->as<Pi>();
-    auto clos_type = Stub::clos_type(new_pi);
-    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
-    return clos_type;
-}
-
-const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
-    if (!Pi::isa_cn(pi)) {
-        log().d("mut Pi {} is not a continuation", pi);
-        return RWPhase::rewrite_mut_Pi(pi);
-    }
-
-    auto new_pi    = RWPhase::rewrite_mut_Pi(pi)->as<Pi>();
-    auto clos_type = Stub::clos_type(new_pi);
-    log().d("rewritten mut pi {} : {}  to  {} : {}", pi, pi->type(), clos_type, clos_type->type());
-    return clos_type;
-}
-
-// enforce closure calling convention
-const Def* ClosConv::rewrite_imm_App(const App* old_app) {
-    auto& w         = new_world();
-    auto new_callee = rewrite(old_app->callee());
-    auto new_arg    = rewrite(old_app->arg());
-
-    auto clos = Stub::isa_closure(new_callee);
-    if (!clos) {
-        log().d("the callee was not detected as a closure. old_app:{}, new_callee {}:{}, new_arg {}:{}", old_app,
-                new_callee, new_callee->type(), new_arg, new_arg->type());
-        return w.app(new_callee, new_arg)->set(old_app->dbg_key());
-    }
-
-    log().d("detected application of closure {} with arg {}", clos, new_arg);
-
-    return Stub::apply(clos, new_arg);
-}
-
-void ClosConv::finalize() {
-    log().i("finalize()");
-    new_world().dot("before_crash.dot");
-    while (!worklist_.empty()) {
-        auto old_lam = worklist_.front();
-        worklist_.pop();
-
-        auto& stub = closures_.at(old_lam);
-
-        // rewrite old_lam to code_body
-        push();
-        rewrite_body(stub, old_lam);
-        pop();
-    }
-}
+// also no change thanks to the partial application of the environment
+const Def* ClosConv::rewrite_imm_App(const App* old_app) { return RWPhase::rewrite_imm_App(old_app); }
