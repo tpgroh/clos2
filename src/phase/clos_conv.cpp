@@ -102,8 +102,6 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
     p_pi->set_codom(create_fn_type(old_lam_type, old_fvs, p_pi->var()));
 
     // setup the outer lambda
-    // BUG: if old_lam was immutable, does the inner lambda also have to be immutable?
-    // or is it OK to use mut_lam.
     auto procedure = w.mut_lam(p_pi);
     procedure->set(old_lam->dbg_key())->debug_prefix("procedure_");
     auto env = procedure->var()->set("env");
