@@ -16,6 +16,7 @@ public:
         : RWPhase(world, annex) {}
 
 private:
+    void map_fvs_to_ext(const DefVec& fvs, const Def* env);
     const Pi* create_fn_type(const Pi*, const DefVec&, const Def*);
     const Def* rewrite_lam_to_clos(const Lam*);
 
