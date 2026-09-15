@@ -144,6 +144,9 @@ const Def* ClosConv::rewrite_lam_to_clos(const Lam* old_lam) {
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
+    // dont close axioms
+    if (is_bootstrapping()) return RWPhase::rewrite_imm_Lam(old_lam);
+
     // BUG: hotfix
     if (old_lam->sym() == "main") return RWPhase::rewrite_imm_Lam(old_lam);
 
@@ -151,6 +154,9 @@ const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
+    // dont close axioms
+    if (is_bootstrapping()) return RWPhase::rewrite_mut_Lam(old_lam);
+
     // BUG: hotfix
     if (old_lam->sym() == "main") return RWPhase::rewrite_mut_Lam(old_lam);
 
