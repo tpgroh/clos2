@@ -1,7 +1,5 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
-#include <format>
-
 #include "mim/def.h"
 #include "mim/lattice.h"
 #include "mim/phase.h"
