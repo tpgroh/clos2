@@ -2,19 +2,7 @@
 The Target of this project is to add closure conversion to the research compiler [MimIR](https://github.com/mimir/mimir).
 
 ## Closure Conversion
-TODO describe what CC is.
-
-## Notes
-because I'm currently only interested in the absract typed closure conversion I currently do not have to think about where the environment will be placed (stack or heap)
-
-I want to complie with the following requirements
-1. A typed closure abstraction **must hide the type of the environment**
-2. A typed closure abstraction **must enforce the calling convention** :\\
-   the code pointer is called with **its packaged environment**.
-   - for this we have to give a prove that the code pointer is only beeing called with and only with the environment which was created for it.\\
-     this can be enforced by the type-system by using `singleton` types.
-3. Procedures are directly callable through their code pointer
-
+TODO describe what Closure Conversion is.
 
 ## Installation
 Because this is a plugin for `MimIR` you will have to clone [it's repository](https://github.com/mimir/mimir) and get it to work.
@@ -22,6 +10,28 @@ Because this is a plugin for `MimIR` you will have to clone [it's repository](ht
 Then you can add this plugin by cloning this repository into `extra/`
 
 MimIR will take care of the rest and will include this plugin in the next build.
+
+## Why not for Calculus of Constructions
+The current state of research seems to be that closure conversion for CC is only possible as an abstract closure conversion,
+thus requiring a different target language.
+
+To my knowledge there is currently no way to do that in MimIR without modifying the mim language, which would be counterproductive in my opinion.
+
+Theoretically there could be a way to get it to work:
+1. Closure conversion from CC to CC-CC or something alike — there are already holes in that transformation for MimIR
+2. CC-CC into something like ACC
+3. ACC to FCC (modified to work with type-passing polymorphism, and possibly dependent types if no way is found to remove them with another translation pass before)
+4. FCC optimization
+5. FCC to mim
+
+To my knowladge there is currently no way to do that in MimIR without modifying the mim language which would be counter productive in my opinion.
+
+Theoreticly there could be a way to get it to work.
+1. closure conversion from CC to CC-CC or something alike, there are already holes in that transformation for MimIR
+2. CC-CC into something like ACC
+3. ACC to FCC (modifyed to work with type passing polymorphism + maybe dependent types if no way is found to remove dependent types with another translation before)
+4 FCC Optimization
+5 FCC to mim
 
 # Current Example
 ### reached clos2 clos_conv phase
