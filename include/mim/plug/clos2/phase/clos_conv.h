@@ -18,11 +18,15 @@ public:
 private:
     void map_fvs_to_ext(const DefVec& fvs, const Def* env);
     const Def* rewrite_lam_to_clos(const Lam*);
+    const Def* clos_type(const Pi*);
 
     bool analyze() final;
     void rewrite_external(Def*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
+    const Def* rewrite_mut_Pi(Pi*) final;
+    const Def* rewrite_imm_Pi(const Pi*) final;
+    const Def* rewrite_imm_App(const App*) final;
 
     FVAnalysis fvana_{};
 };
