@@ -74,3 +74,8 @@ fun _5003 (environment_n_5005: I32): I32 → I32 =
 lam procedure_adder_5008 (env_n_5009: I32) (arg_5011: I32): I32 =
     core.wrap.add 0 i32 (env_n_5009, arg_5011);
 ```
+
+classical example: of impredicativity bugs I had to work on:
+```
+note: expected [*, [*, *, Cn [*, [I32, [*, *, Cn [*, I32]]]]]], got [*, [*, *, Cn [*, [I32, [*, *, Cn [*, I32]]]]]]
+```

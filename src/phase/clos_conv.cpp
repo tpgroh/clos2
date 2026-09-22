@@ -15,7 +15,7 @@ bool ClosConv::analyze() {
 
     log().i("this is what reached clos2");
     w.dump();
-    // w.dot("middle.dot", {.all_annexes = true});
+    w.dot("middle.dot");
 
     return false;
 }
@@ -30,19 +30,7 @@ void ClosConv::map_fvs_to_ext(const DefVec& fvs, const Def* env) {
     }
 
     for (size_t i = 0; i < fvs.size(); i++)
-        map(fvs[i], env->proj(i));
-}
-
-const Def* ClosConv::get_environment(const DefVec& fvs) {
-    auto& w = new_world();
-
-    // TODO: maybe also set sym using ->set<true> (fvs[i]->dbg_key())->debug_prefix("environment_")
-    DefVec new_fvs{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
-    const Def* environment = w.tuple(new_fvs);
-    // TODO: maybe set sym
-    // if (fvs.size() > 1) environment->debug_prefix("environment_");
-
-    return environment;
+        map(fvs[i], new_world().extract(env, i));
 }
 
 const Def* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam) {
@@ -50,34 +38,39 @@ const Def* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const
 
     auto& w           = new_world();
     auto old_lam_type = old_lam->type();
-    assert(Pi::isa_cn(old_lam_type));
 
     log().i("CC {} env_type {}:{}", old_lam, env_type, env_type->type());
 
     // create sigma type for domain
     push();
-    auto sig = w.mut_sigma(w.type<1>(), 2);        // domain must be a dependant pair
+    // TODO: rewrite(old_world().umax<UMax::Type>({old_lam_type->dom(), old_world().type()}));
+    auto sig = w.mut_sigma(2);                     // domain must be a dependant pair
     sig->set(0, env_type);                         // first argument is the environment
-    map_fvs_to_ext(fvs, sig->proj(0));             // the actual arguments type might depend on the environment
-    auto arg_type = rewrite(old_lam_type->doms()); // rewrite the actual arguments
-    sig->set(1, w.sigma(arg_type));                // the second entry is the actual argument
+    map_fvs_to_ext(fvs, w.unwrap(sig->var(2, 0))); // the actual arguments type might depend on the environment
+    sig->set(1, rewrite(old_lam_type->dom()));     // the second entry is the actual argument
     pop();
 
-    // setup the outer lambda
+    log().i("CC {} procedure domain type {}:{}", old_lam, sig, sig->type());
+
+    // setup procedure lamda
     auto procedure = w.mut_con(sig);
     procedure->set(old_lam->dbg_key())->debug_prefix("procedure_");
-    // BUG: maybe not possible if old_lam was immutable thus has no var
     auto [env, arg] = procedure->vars<2>();
 
     // rewrite body
     push();
-    map_fvs_to_ext(fvs, env);
-    if (auto mut_old_lam = old_lam->isa_mut<Lam>()) map(mut_old_lam->var(), arg);
+    map_fvs_to_ext(fvs, w.unwrap(env));
+    if (auto mut_old_lam = old_lam->isa_mut<Lam>()) {
+        log().i("mapping  {} to {}", mut_old_lam->var(), arg);
+        map(mut_old_lam->var(), arg);
+    }
     auto body = rewrite(old_lam->body());
     procedure->set(false, body);
-    log().w("CC {} prc has fvs {}", old_lam, procedure->free_vars());
-    // assert(procedure->is_closed());
-    pop();
+    if (!procedure->is_closed()) log().e("CC {} prc has fvs {}", old_lam, procedure->free_vars());
+    procedure->dot("crash.dot", {.follow_types = true});
+    // FIXME: using singletons for environment this fails because something from the singleon's value gets included in
+    // the type of things assert(procedure->is_closed()); ();
+    //
 
     return procedure;
 }
@@ -91,55 +84,72 @@ const Def* ClosConv::closure_pack(const Lam* old_lam) {
     for (auto v : fvset)
         fvs.push_back(v);
 
-    // get the environment
-    auto environment      = get_environment(fvs);
-    auto environment_type = w.uniq(environment);
-    auto procedure        = get_procedure(fvs, environment_type, old_lam);
+    log().i("CP {} with fvset {}", old_lam, fvset);
 
-    auto clostype = w.mut_sigma(w.type<1>(), 3); // FIXME:
-    clostype->set(0, w.type());
-    clostype->set(1, clostype->var(0));
-    clostype->set(2, w.cn(clostype->var(0), procedure->type()->as<Pi>()->dom(1)));
+    // create the environment
+    DefVec new_fvs{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
+    const Def* environment = w.wrap(w.tuple(new_fvs));
+    auto environment_type  = environment->type();
+    log().i("CP {} environment {}:{}", old_lam, environment, environment_type);
+    auto procedure = get_procedure(fvs, environment_type, old_lam);
 
-    return w.tuple(clostype, {environment_type, environment, procedure});
+    // FIXME: use clos_type function to prevent defining closure representation in two places
+    auto clos = w.tuple(/* clostype, */ {environment_type, environment, procedure})
+                    ->set(old_lam->sym())
+                    ->debug_prefix("closure_");
+
+    log().i("PK {} env_type {}", old_lam, environment_type);
+    log().i("PK {} environment {}", old_lam, environment);
+    log().i("PK {} procedure_type {}", old_lam, procedure->type());
+    log().i("PK {} as {}:{}", old_lam, clos, clos->type());
+
+    return clos;
 }
 const Def* ClosConv::closure_apply(const Def* clos, const Def* arg) {
+    auto& w             = new_world();
     auto [_, env, proc] = clos->projs<3>();
 
+    log().i("UP {}", clos);
     log().i("prc {}:{}", proc, proc->type());
     log().i("env {}:{}", env, env->type());
     log().i("arg {}:{}", arg, arg->type());
 
-    return new_world().app(proc, {env, arg});
+    w.tuple({clos, arg})->dot("crash.dot", {.follow_types = false});
+
+    return w.app(proc, {env, arg});
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
     // dont close axioms
     if (is_bootstrapping()) return RWPhase::rewrite_imm_Lam(old_lam);
 
-    return closure_pack(old_lam);
+    return map(old_lam, closure_pack(old_lam));
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
     // dont close axioms
     if (is_bootstrapping()) return RWPhase::rewrite_mut_Lam(old_lam);
 
-    return closure_pack(old_lam);
+    return map(old_lam, closure_pack(old_lam));
 }
 
-const Def* ClosConv::clos_type(const Pi* old_pi) {
-    assert(Pi::isa_cn(old_pi));
-
+const Def* ClosConv::procedure_type(const Pi* pi, const Def* env_type) {
     auto& w = new_world();
 
-    auto new_doms = DefVec{old_pi->num_doms(), [&](auto i) { return rewrite(old_pi->dom(i)); }};
+    // TODO: move the stuff from clos_pack here
 
-    auto sig = w.mut_sigma(w.type<1>(), 3);
+    return w.cn({env_type, rewrite(pi->dom())});
+}
+
+const Def* ClosConv::clos_type(const Pi* pi) {
+    auto& w = new_world();
+
+    auto sig = w.mut_sigma(3);
     sig->set(0, w.type());
-    auto N = sig->var(0);
+    auto N = sig->var(3, 0);
     N->set("N");
     sig->set(1, N);
-    sig->set(2, w.cn({N, w.sigma(new_doms)}, old_pi->is_implicit()));
+    sig->set(2, procedure_type(pi, N));
 
     return sig;
 }
@@ -161,8 +171,8 @@ void ClosConv::rewrite_external(Def* old_mut) {
 
     // TODO: clos detection
     if (auto tup = new_def->isa_imm<Tuple>()) {
-        auto [_, _, proc] = tup->projs<3>();
-        proc->as_mut()->externalize();
+        auto proc = tup->proj(3, 2);
+        proc->as_mut<Lam>()->externalize();
     } else
         new_def->as_mut()->externalize();
 }

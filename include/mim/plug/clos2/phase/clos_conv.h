@@ -18,10 +18,8 @@ public:
 private:
     void map_fvs_to_ext(const DefVec& fvs, const Def* env);
 
-    const Def* get_environment_type(const DefVec& fvs);
-
-    const Def* get_environment(const DefVec& fvs);
     const Def* get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam);
+    const Def* procedure_type(const Pi*, const Def* env_type);
     const Def* clos_type(const Pi*);
     const Def* closure_pack(const Lam* old_lam);
     const Def* closure_apply(const Def* clos, const Def* arg);
