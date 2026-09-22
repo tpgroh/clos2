@@ -33,7 +33,7 @@ void ClosConv::map_fvs_to_ext(const DefVec& fvs, const Def* env) {
         map(fvs[i], new_world().extract(env, i));
 }
 
-const Def* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam) {
+const Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam) {
     log().i("CC {} closing", old_lam);
 
     auto& w           = new_world();
@@ -94,9 +94,9 @@ const Def* ClosConv::closure_pack(const Lam* old_lam) {
     auto procedure = get_procedure(fvs, environment_type, old_lam);
 
     // FIXME: use clos_type function to prevent defining closure representation in two places
-    auto clos = w.tuple(/* clostype, */ {environment_type, environment, procedure})
-                    ->set(old_lam->sym())
-                    ->debug_prefix("closure_");
+    auto clostype = clos_type_of(procedure->type());
+    auto clos
+        = w.tuple(clostype, {environment_type, environment, procedure})->set(old_lam->sym())->debug_prefix("closure_");
 
     log().i("PK {} env_type {}", old_lam, environment_type);
     log().i("PK {} environment {}", old_lam, environment);
@@ -150,6 +150,26 @@ const Def* ClosConv::clos_type(const Pi* pi) {
     N->set("N");
     sig->set(1, N);
     sig->set(2, procedure_type(pi, N));
+
+    return sig;
+}
+
+const Def* procedure_type_remove_env(const Pi* pi, const Def* env_type) {
+    auto& w  = pi->world();
+    auto dom = pi->dom(2, 1);
+
+    return w.cn({env_type, dom});
+}
+
+const Def* ClosConv::clos_type_of(const Pi* pi) {
+    auto& w = pi->world();
+
+    auto sig = w.mut_sigma(3);
+    sig->set(0, w.type());
+    auto N = sig->var(3, 0);
+    N->set("N");
+    sig->set(1, N);
+    sig->set(2, procedure_type_remove_env(pi, N));
 
     return sig;
 }
