@@ -44,10 +44,10 @@ const Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const
     // create sigma type for domain
     push();
     // TODO: rewrite(old_world().umax<UMax::Type>({old_lam_type->dom(), old_world().type()}));
-    auto sig = w.mut_sigma(2);                     // domain must be a dependant pair
-    sig->set(0, env_type);                         // first argument is the environment
-    map_fvs_to_ext(fvs, w.unwrap(sig->var(2, 0))); // the actual arguments type might depend on the environment
-    sig->set(1, rewrite(old_lam_type->dom()));     // the second entry is the actual argument
+    auto sig = w.mut_sigma(2);                 // domain must be a dependant pair
+    sig->set(0, env_type);                     // first argument is the environment
+    map_fvs_to_ext(fvs, sig->var(2, 0));       // the actual arguments type might depend on the environment
+    sig->set(1, rewrite(old_lam_type->dom())); // the second entry is the actual argument
     pop();
 
     log().i("CC {} procedure domain type {}:{}", old_lam, sig, sig->type());
@@ -59,11 +59,8 @@ const Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const
 
     // rewrite body
     push();
-    map_fvs_to_ext(fvs, w.unwrap(env));
-    if (auto mut_old_lam = old_lam->isa_mut<Lam>()) {
-        log().i("mapping  {} to {}", mut_old_lam->var(), arg);
-        map(mut_old_lam->var(), arg);
-    }
+    map_fvs_to_ext(fvs, env);
+    if (auto mut_old_lam = old_lam->isa_mut<Lam>()) map(mut_old_lam->var(), arg);
     auto body = rewrite(old_lam->body());
     procedure->set(false, body);
     if (!procedure->is_closed()) log().e("CC {} prc has fvs {}", old_lam, procedure->free_vars());
@@ -88,7 +85,7 @@ const Def* ClosConv::closure_pack(const Lam* old_lam) {
 
     // create the environment
     DefVec new_fvs{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
-    const Def* environment = w.wrap(w.tuple(new_fvs));
+    const Def* environment = w.tuple(new_fvs);
     auto environment_type  = environment->type();
     log().i("CP {} environment {}:{}", old_lam, environment, environment_type);
     auto procedure = get_procedure(fvs, environment_type, old_lam);
