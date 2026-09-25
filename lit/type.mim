@@ -1,0 +1,12 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+
+import pipeline;
+
+use core.ops.s.w;
+
+extern fun get (T:*, v:«2;T») : T = return v#0_2;
+
+extern fun test(argc: I32): I32 =
+    get ((I32, (argc, argc)), return);

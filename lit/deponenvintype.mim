@@ -1,6 +1,10 @@
-plugin core
+// RUN: %mim -I %S %s -o -
 
-import _pipeline;
+plugin core;
+
+import pipeline;
+
+use core.ops.s.w;
 
 // here the types of the get functions depend on n which is free in both.
 // thus n will be in the environment of the closures of those functions.
@@ -26,7 +30,7 @@ import _pipeline;
 // but I think that for the escaping function to be usable in any way n also has to escape to that place, thus inlining should be possible?
 // (I think in those places n will be replace by env.n where env is the environment of the thing that escapes with n in it)
 
-extern fun test1 (n:Nat) :I32 =
+extern fun test (n:Nat) :I32 =
 
     // create two lambdas with the same type, both having n free
     let get1 = fn (x: Nat) : Idx n = return (core.idx 0 n x);
@@ -38,8 +42,7 @@ extern fun test1 (n:Nat) :I32 =
         return (core.bitcast I32 x);
     
     // first class use of the get functions
-    ret x = apply $ get;
-    ret y = apply $ get;
+    ret x = apply $ get1;
+    ret y = apply $ get2;
 
-    return core.wrap.add 0 (x,y);
-
+    return (x+y);
