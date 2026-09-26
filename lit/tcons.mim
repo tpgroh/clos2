@@ -1,0 +1,17 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+
+import pipeline;
+
+// TODO: I'll have to replace this with a more reasonable test
+
+extern fun cons (n:Nat) = return (Idx n);
+
+// most of this will just get replaced (t will be discarded for example) but it keeps the cons function in the output
+extern fun test (n:Nat) =
+    ret t = cons $ n;
+    let f = fn () : t = return (core.bitcast t 0I32);
+    ret x = f $ ();
+    return x;
+    //return (core.bitcast (Idx n) x);
