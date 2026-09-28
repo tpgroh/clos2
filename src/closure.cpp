@@ -10,9 +10,15 @@ const Def* Closure::closure_type(const Def* dom) {
 
     auto sig = w.mut_sigma(3);
     sig->set(0, w.type());
-    auto N = sig->var(3, 0)->set("N");
+    auto N = sig->var(3, 0);
     sig->set(1, N);
     sig->set(2, w.cn({N, dom}));
+
+    // to help with debugging
+    sig->var(3, 0)->set("N");
+    sig->var(3, 1)->set("n");
+    sig->var(3, 2)->set("p");
+    sig->set("closure");
 
     return sig;
 }
@@ -20,8 +26,9 @@ const Def* Closure::closure_type(const Def* dom) {
 const Def* Closure::pack() const {
     auto& w       = procedure->world();
     auto clostype = closure_type(procedure->type()->dom());
-
-    return w.tuple(clostype, {environment->type(), environment, procedure});
+    auto clos     = w.tuple(clostype, {environment->type(), environment, procedure});
+    clos->set("closure");
+    return clos;
 }
 
 const Def* Closure::closure_apply(const Def* clos, const Def* arg) {
@@ -32,7 +39,7 @@ const Def* Closure::closure_apply(const Def* clos, const Def* arg) {
     w.log().i("prc {}:{}", proc, proc->type());
     w.log().i("env {}:{}", env, env->type());
     w.log().i("arg {}:{}", arg, arg->type());
-    w.tuple({clos, arg})->dot("crash.dot", {.follow_types = false});
+    // w.tuple({clos, arg})->dot("crash.dot", {.follow_types = false});
 
     return w.app(proc, {env, arg});
 }

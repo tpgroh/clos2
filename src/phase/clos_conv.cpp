@@ -1,7 +1,6 @@
 #include "mim/plug/clos2/phase/clos_conv.h"
 
 #include "mim/def.h"
-#include "mim/lattice.h"
 #include "mim/phase.h"
 
 using namespace mim;
@@ -15,7 +14,7 @@ bool ClosConv::analyze() {
 
     log().i("this is what reached clos2");
     w.dump();
-    w.dot("middle.dot");
+    // w.dot("middle.dot");
 
     return false;
 }
@@ -32,11 +31,17 @@ Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* 
     push();
     auto sig = w.mut_sigma(2);
     sig->set(0, env_type);
-    if (fvs.size() == 1)
-        map(fvs[0], sig->var(2, 0));
-    else
-        for (size_t i = 0; i < fvs.size(); i++)
-            map(fvs[i], new_world().extract(sig->var(2, 0), i));
+    auto env = sig->var(2, 0)->set("env");
+    if (fvs.size() == 1) {
+        env->set(fvs[0]->dbg_key());
+        map(fvs[0], env);
+    } else
+        for (size_t i = 0; i < fvs.size(); i++) {
+            auto f = fvs[i];
+            auto v = w.extract(env, i);
+            v->set(f->dbg_key());
+            map(f, v);
+        }
     sig->set(1, rewrite(old_lam_type->dom())); // the second entry is the actual argument
     pop();
 
