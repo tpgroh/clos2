@@ -133,12 +133,12 @@ TEST_CASE("internals_threshold1") {
     ast::load_plugin(w, "core");
 
     auto foo = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
-    auto v1  = foo->var(0)->proj(0);
-    auto v2  = foo->var(1)->proj(0);
+    auto v1  = foo->var(foo->num_projs(), 0)->proj(2, 0);
+    auto v2  = foo->var(foo->num_projs(), 1)->proj(2, 0);
     auto b   = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
     for (size_t i = 2; i < w.flags().scalarize_threshold; i++) {
         v1 = b;
-        v2 = foo->var(i)->proj(0);
+        v2 = foo->var(foo->num_projs(), i)->proj(2, 0);
         b  = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
     }
     foo->set(false, b);
@@ -147,7 +147,7 @@ TEST_CASE("internals_threshold1") {
     auto fvs = ana.free_vars(foo->body());
     CHECK(fvs.size() == w.flags().scalarize_threshold);
     for (size_t i = 0; i < w.flags().scalarize_threshold; i++)
-        CHECK(fvs.contains(foo->var(i)->proj(0)));
+        CHECK(fvs.contains(foo->var(foo->num_projs(), i)->proj(2, 0)));
 }
 
 // tests if it unpeels if extracting from a var which has an arity higher or equal to the scalarize_threshold
@@ -156,7 +156,7 @@ TEST_CASE("internals_threshold2") {
     auto& w = driver.world();
     ast::load_plugin(w, "core");
     auto foo      = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
-    auto [v1, v2] = foo->var(7)->projs<2>();
+    auto [v1, v2] = foo->var(foo->num_projs(), 7)->projs<2>();
     foo->set(false, w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2}));
 
     clos2::FVAnalysis ana;
@@ -176,7 +176,7 @@ TEST_CASE("internals_extract_from_lam") {
     auto inner = w.mut_lam(w.type_i32(), w.arr(2, w.type_i32()));
     inner->set(false, w.tuple({v, v}));
     auto bar = w.app(inner, w.lit_i32(1));
-    foo->set(false, bar->proj(1));
+    foo->set(false, bar->proj(bar->num_projs(), 1));
 
     clos2::FVAnalysis ana;
     auto fvs = ana.free_vars(foo);

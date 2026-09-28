@@ -1,0 +1,26 @@
+// UNSUPPORTED: always
+// RUN: %mim -I %S %s -o -
+
+plugin compile;
+plugin clos2;
+
+// define a custom pipeline for optimization
+extern lam _compile(): compile.Phase =
+	let optimize =
+        compile.phases (compile.aggr ff) (
+            compile.scalarize,
+            compile.phases tt (
+                compile.beta_red,
+                compile.eta_conv,
+            ),
+            compile.named "mem.seo",
+            compile.static_arg_opt,
+        );
+
+    compile.phases ff (
+		optimize,
+		compile.branch_normalize,
+        compile.named "cps.conv",
+
+        compile.named "clos2.clos_conv",
+    );

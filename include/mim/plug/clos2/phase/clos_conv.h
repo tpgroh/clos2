@@ -1,11 +1,14 @@
 #pragma once
 
+#include <queue>
+
 #include "mim/def.h"
 #include "mim/lam.h"
 #include "mim/phase.h"
 
 #include "mim/util/types.h"
 
+#include "mim/plug/clos2/clos2.h"
 #include "mim/plug/clos2/fv.h"
 
 namespace mim::plug::clos2 {
@@ -16,15 +19,22 @@ public:
         : RWPhase(world, annex) {}
 
 private:
-    const Pi* create_fn_type(const Pi*, const DefVec&, const Def*);
-    const Def* rewrite_lam_to_clos(const Lam*);
+    const Def* get_closure(const Lam* old_lam);
+    Lam* get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam);
+    void rewrite_procedure_body(const Lam* old_lam);
 
     bool analyze() final;
     void rewrite_external(Def*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
+    const Def* rewrite_mut_Pi(Pi*) final;
+    const Def* rewrite_imm_Pi(const Pi*) final;
+    const Def* rewrite_imm_App(const App*) final;
+    void finalize() final;
 
     FVAnalysis fvana_{};
+    DefMap<Closure> closures_{};
+    std::queue<const Lam*> worklist_{};
 };
 
 } // namespace mim::plug::clos2

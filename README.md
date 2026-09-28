@@ -84,3 +84,62 @@ fun _5003 (environment_n_5005: I32): I32 → I32 =
 lam procedure_adder_5008 (env_n_5009: I32) (arg_5011: I32): I32 =
     core.wrap.add 0 i32 (env_n_5009, arg_5011);
 ```
+
+classical example: of impredicativity bugs I had to work on:
+```
+note: expected [*, [*, *, Cn [*, [I32, [*, *, Cn [*, I32]]]]]], got [*, [*, *, Cn [*, [I32, [*, *, Cn [*, I32]]]]]]
+```
+
+
+### example with the existential hiding of the environment.
+Note that this will most likely fail for dependently typed functions and polymorphic functions, because mim has a predicative universe hierarchy.
+
+```mim
+plugin core;
+plugin mem;
+import compile;
+import pipeline;
+plugin compile;
+plugin clos2;
+
+extern fun make_adder (n_5306: I32): Cn [I32, Cn I32] =
+    con f_5301 (x_5304: I32, return_5312: Cn I32) as _5303 =
+        let _5311 = core.wrap.add 0 @ i32 (x_5304, n_5306);
+        return_5312 _5311;
+
+    return f_5301;
+
+extern con main (m_5289: mem.M 0, argc_5286: I32, _: mem.Ptr (mem.Ptr (I8, 0), 0), return_5293: Cn [mem.M 0, I32]) as _5285 =
+    con _5281 (add2_5296: Cn [I32, Cn I32]) =
+        con _5287 (c_5290: I32) =
+            return_5293 (m_5289, c_5290);
+
+        add2_5296 (argc_5286, _5287);
+
+    make_adder (2I32, _5281);
+```
+has the following output
+```mim
+plugin core;
+plugin mem;
+import compile;
+import pipeline;
+plugin compile;
+plugin clos2;
+
+extern con procedure_make_adder (_5310: «()», (n_5313: I32, (N_5353: *, _5354: _5311#tt#0₃, _5357: Cn [_5311#tt#0₃, [N_5295: *, N_5295, Cn [N_5295, [I32, [N_5298: *, N_5298, Cn [N_5298, I32]]]]]]) as return_5312) as _5311) as _5309 =
+    con procedure_f_5326 (_5328: «_5311#ff», (x_5335: I32, (N_5338: *, _5339: _5329#tt#0₃, _5342: Cn [_5329#tt#0₃, I32]) as return_5330) as _5329) as _5327 =
+        let _5337 = core.wrap.add 0 @ i32 (_5329#ff, _5311#ff);
+        _5329#tt#2₃ (_5329#tt#1₃, _5337);
+
+    _5311#tt#2₃ (_5311#tt#1₃, («_5311#ff», ‹_5311#ff›, procedure_f_5326));
+
+extern con procedure_main (_5285: «()», (m_5397: mem.M 0, argc_5401: I32, _: mem.Ptr (mem.Ptr (I8, 0), 0), (N_5427: *, _5428: _5286#3₄#0₃, _5431: Cn [_5286#3₄#0₃, [mem.M 0, I32]]) as return_5399) as _5286) as _5284 =
+    con procedure__5410 (_5412: «(_5286#0₄, _5286#3₄, _5286#1₄)», (N_5443: *, _5444: _5413#0₃, _5447: Cn [_5413#0₃, [I32, [N_5384: *, N_5384, Cn [N_5384, I32]]]]) as _5413) as _5411 =
+        con procedure__5422 (_5424: «(_5286#3₄, _5286#0₄)», _5425: I32) as _5423 =
+            _5286#3₄#2₃ (_5286#3₄#1₃, (_5286#0₄, _5425));
+
+        _5413#2₃ (_5413#1₃, (_5286#1₄, («(_5286#3₄, _5286#0₄)», ‹(_5286#3₄, _5286#0₄)›, procedure__5422)));
+
+    procedure_make_adder (‹()›, (2I32, («(_5286#0₄, _5286#3₄, _5286#1₄)», ‹(_5286#0₄, _5286#3₄, _5286#1₄)›, procedure__5410)));
+```

@@ -1,0 +1,12 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+
+import pipeline;
+
+use core.ops.s.w;
+
+extern fun get (m:Nat) : Idx m = return (core.idx 0 m 1984);
+
+extern fun test(argc: I32): I32 =
+    get (i32, return);
