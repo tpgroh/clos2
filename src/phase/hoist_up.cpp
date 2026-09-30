@@ -8,80 +8,38 @@ using namespace mim::plug;
 using namespace mim::plug::clos2;
 
 DefVec HoistUp::getFreeTypeVars(const Def* type) {
-    auto fvset = fvana_.free_vars(type);
     // TODO: order the free vars in a deterministic way which only depends on the type.
-    // For example the order in which they would appear in the written version of the IR
-    auto old_fvs = DefVec{fvset.begin(), fvset.end()};
-    auto fvs     = DefVec{fvset.size(), [&](auto i) { return rewrite(old_fvs[i]); }};
+    // For example the order in which they would appear in the written version of the IL
+
+    auto fvset = fvana_.free_vars(type);
+    auto fvs   = DefVec{fvset.begin(), fvset.end()};
 
     return fvs;
 }
 
 template<bool ismut>
 const Def* HoistUp::hoistUp(const Lam* lam) {
-    auto& w = new_world();
+    // Lam (x:A).e ~> Lam (n_i:T_i ...) (x:{z_i->n_i...}A) . {z_i->n_i..}e
+    // z_i are the free variables of A,B in a deterministic and unambiguous order
+    //
+    // TODO: implement this transformation
 
-    push();
-
-    // select the free vars to lambda lift
-    auto fvset = fvana_.free_vars(lam->type());
-    log().i("HoistUp {} with free type vars {}", lam, fvset);
-    auto old_fvs = DefVec{fvset.begin(), fvset.end()};
-    auto fvs     = DefVec{fvset.size(), [&](auto i) { return rewrite(old_fvs[i]); }};
-
-    auto environment = w.tuple(fvs);
-
-    log().i("HoistUp {} environment {}", lam, environment);
-
-    // get the type universe level of the outer lambda
-    auto umax_set = fvset;
-    umax_set.insert(lam);
-    auto outer_pi_type = old_world().umax<UMax::Term>(umax_set);
-
-    // create the pi type of the outer lambda
-    auto outer_pi = w.mut_pi(rewrite(outer_pi_type));
-    outer_pi->set_dom(environment->type());
-    auto N = outer_pi->var();
-
-    if (fvs.size() == 1)
-        map(old_fvs[0], N);
-    else
-        for (size_t i = 0; i < fvs.size(); i++)
-            map(old_fvs[i], w.extract(N, i));
-
-    // create outer lambda
-    log().i("outer lam doms {}", outer_pi->doms());
-    auto outer_lam = w.mut_lam(outer_pi);
-
-    if (fvs.size() == 1)
-        map(old_fvs[0], outer_lam->var());
-    else
-        for (size_t i = 0; i < fvs.size(); i++)
-            map(old_fvs[i], outer_lam->var(outer_lam->num_doms(), i));
-
-    // use RWPhase to get the inner lambda
-    const Def* body;
-    if constexpr (ismut)
-        body = RWPhase::rewrite_mut_Lam(lam->as_mut<Lam>());
-    else
-        body = RWPhase::rewrite_imm_Lam(lam);
-
-    outer_pi->set_codom(body->type());
-    log().i("outer lam codom {}", outer_pi->codom());
-    outer_lam->set(false, body);
-
-    pop();
-
-    return map(lam, w.app(outer_lam, environment));
+    return nullptr;
 }
 
 template<bool ismut>
 const Def* HoistUp::hoistUp(const Pi* pi) {
-    // TODO: implement
+    // Pi x:A.B ~> Pi [n_i:T_i ..., x:{z_i -> n_i ...}A] . {z_i -> n_i ...}B
+    // z_i are the free variables of A,B in a deterministic and unambiguous order
+    //
+    // TODO: implement this transformation
+
     return nullptr;
 }
 
 const Def* HoistUp::rewrite_imm_App(const App* app) {
+    // foo bar ~> foo' (z_i..., bar')
+    //
     // TODO: if the callee has free vars in its type we have to get those, rewrite them an apply them as the first
     // arguments before app->arg()
     return RWPhase::rewrite_imm_App(app);
