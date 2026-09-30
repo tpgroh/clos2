@@ -11,6 +11,7 @@ add_mim_plugin(clos2
         src/normalizers.cpp
         src/closure.cpp
         src/phase/clos_conv.cpp
+        src/phase/hoist_up.cpp
 )
 
 if(MIM_BUILD_EXAMPLES)

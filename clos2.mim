@@ -14,4 +14,5 @@ import compile;
 /// ## Operations
 ///
 /// ## Phases
+axm hoist_up: compile.Phase;
 axm clos_conv: compile.Phase;
