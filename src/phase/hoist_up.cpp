@@ -19,14 +19,51 @@ DefVec HoistUp::getFreeTypeVars(const Def* type) {
 
 template<bool ismut>
 const Def* HoistUp::hoistUp(const Lam* lam) {
+    auto& w = new_world();
+
+    push();
+
     // Lam (x:A).e ~> Lam (n_i:T_i ...) (x:{z_i->n_i...}A) . {z_i->n_i..}e
     // z_i are the free variables of A,B in a deterministic and unambiguous order
-    //
-    // TODO: implement this transformation
 
-    return nullptr;
+    auto fvs = getFreeTypeVars(lam->type());
+
+    // create new_lam
+    auto lam_type = rewrite(lam->type())->as<Pi>();
+    auto new_lam  = w.mut_lam(lam_type);
+
+    // remap free vars
+    for (size_t i = 0; i < fvs.size(); i++) {
+        auto f = fvs[i];
+        auto n = new_lam->var(new_lam->num_vars(), i);
+        n->set(f->sym());
+        map(f, n);
+    }
+    if constexpr (ismut) {
+        auto mlam = lam->as_mut<Lam>();
+        for (size_t j = 0; j < mlam->num_vars(); j++) {
+            auto i = j + fvs.size();
+            auto a = mlam->var(mlam->num_vars(), j);
+            auto n = new_lam->var(new_lam->num_vars(), i);
+            n->set(a->sym());
+            map(a, n);
+        }
+    }
+
+    auto body = rewrite(lam->body());
+    new_lam->set(rewrite(lam->filter()), body);
+
+    // TODO: check if I want this
+    if (new_lam->is_immutabilizable()) new_lam->immutabilize();
+
+    pop();
+
+    log().d("{} ~> {}", lam, new_lam);
+
+    return new_lam;
 }
 
+// TODO: if I limit this for continuations I can make the transformation simpler
 template<bool ismut>
 const Def* HoistUp::hoistUp(const Pi* pi) {
     auto& w = new_world();
@@ -77,19 +114,41 @@ const Def* HoistUp::hoistUp(const Pi* pi) {
     auto codom = rewrite(pi->codom());
     new_pi->set_codom(codom);
 
+    // TODO: check if I want this
+    if (new_pi->is_immutabilizable()) new_pi->immutabilize();
+
     pop();
 
-    log().i("{} ~> {}", pi, new_pi);
+    log().d("{} ~> {}", pi, new_pi);
 
     return new_pi;
 }
 
 const Def* HoistUp::rewrite_imm_App(const App* app) {
+    auto& w = new_world();
+
     // foo bar ~> foo' (z_i..., bar')
-    //
-    // TODO: if the callee has free vars in its type we have to get those, rewrite them an apply them as the first
-    // arguments before app->arg()
-    return RWPhase::rewrite_imm_App(app);
+
+    // TODO: detect curried application.
+    // currently done by checking if the callee is an App. maybe this is not the correct way
+    if (is_bootstrapping() || app->callee()->isa<App>() || app->callee_type()->is_closed())
+        return RWPhase::rewrite_imm_App(app);
+
+    auto new_callee = rewrite(app->callee());
+    auto fvs        = getFreeTypeVars(app->callee_type());
+    DefVec new_arg{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
+    for (auto a : app->args())
+        new_arg.emplace_back(rewrite(a));
+
+    log().d("app {}", app);
+    log().d("  callee {}:{}", new_callee, new_callee->type());
+    log().d("  args {}:{}", new_arg, w.tuple(new_arg)->type());
+
+    auto new_app = w.app(new_callee, new_arg);
+
+    log().d("{} ~> {}", app, new_app);
+
+    return new_app;
 }
 
 const Def* HoistUp::rewrite_mut_Pi(Pi* pi) {
@@ -114,5 +173,5 @@ const Def* HoistUp::rewrite_imm_Lam(const Lam* old_lam) {
 const Def* HoistUp::rewrite_mut_Lam(Lam* old_lam) {
     if (is_bootstrapping() || old_lam->type()->is_closed()) return RWPhase::rewrite_mut_Lam(old_lam);
 
-    return hoistUp<true>(old_lam);
+    return map(old_lam, hoistUp<true>(old_lam));
 }

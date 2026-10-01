@@ -31,6 +31,8 @@ private:
     // get deterministic ordering of free vars in @p type
     DefVec getFreeTypeVars(const Def* type);
 
+    // TODO: currently the template vars are not required. I should just remove them after cleaning up the code
+
     // lambda lift @p lam
     template<bool ismut>
     const Def* hoistUp(const Lam* lam);
@@ -38,11 +40,6 @@ private:
     // add extra domain vars to @p pi to make free vars in the type explicit
     template<bool ismut>
     const Def* hoistUp(const Pi* pi);
-
-    bool analyze() final {
-        old_world().dump();
-        return false;
-    }
 
     const Def* rewrite_mut_Pi(Pi*) final;
     const Def* rewrite_imm_Pi(const Pi*) final;

@@ -3,24 +3,19 @@
 
 plugin compile;
 plugin clos2;
+plugin cps;
 
 // define a custom pipeline for optimization
 extern lam _compile(): compile.Phase =
-	let optimize =
-        compile.phases (compile.aggr ff) (
-            compile.scalarize,
-            compile.phases tt (
-                compile.beta_red,
-                compile.eta_conv,
-            ),
-            compile.named "mem.seo",
-            compile.static_arg_opt,
-        );
-
     compile.phases ff (
-		optimize,
-		compile.branch_normalize,
-        compile.named "cps.conv",
+        // in general I want to perform cps.conv before anything else.
+        // TODO: uncomment
+        // compile.named "cps.conv",
 
+        // lambda lift free vars in the type of lambdas.
+        // this ensures that lambdas dont have free vars in their type, as required by clos_conv
+        compile.named "clos2.hoist_up",
+
+        // closure convert every lambda.
         compile.named "clos2.clos_conv",
     );
