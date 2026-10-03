@@ -6,7 +6,8 @@ import pipeline;
 
 use core.ops.s.w;
 
-extern fun get (m:Nat) : Idx m = return (core.idx 0 m 1984);
+extern fun get (m:Nat, x: Idx m) : I32 = return (core.bitcast I32 x);
 
-extern fun test(argc: I32): I32 =
-    get (i32, return);
+extern fun test(m:Nat): I32 =
+    ret x = get $ (m, core.idx 0 m 1984);
+    return x;

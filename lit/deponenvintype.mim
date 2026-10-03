@@ -6,35 +6,12 @@ import pipeline;
 
 use core.ops.s.w;
 
-// here the types of the get functions depend on n which is free in both.
-// thus n will be in the environment of the closures of those functions.
-// The procedures will have types which might be something like the following
-//
-// `fn (env1:Nat) (x:Nat) : Idx env1` and `fn (env1:Nat) (x:Nat) : Idx env1`
-//
-// Because get1 and get2 were usable interchangeable we must make sure that the closures are as well.
-//
-// NOTE: how this is done by others:
-// 1. in the 1996 paper this is done using singletons.
-//    We just say env of type Nat where every possible argument passed to the procedure
-//    fulfills env == n
-//    this way we tell the type checker that Idx env1, Idx env2 and Idx n are interchangeable
-// 2. in the 2018 paper they add a new typing rule which types closures as a Pi type where we insert
-//    the actual environment from the closure into the type of the procedure.
-//    This is only possible for abstract closure conversion which is not possible for plugins in mimir.
-//
-// NOTE: because n is free in getN and the source type checked, those can only appear where n is in scope this might limit the cases
-// where this can happen (free var in type) to such a nice set of cases that we can use something else to take care of those.
-// for example inline known call sites. => we dont have to closure convert because no longer a function
-// I'm currently not sure how escaping functions happen in the graph thus I'm not sure if and when in which way those functions might escape.
-// but I think that for the escaping function to be usable in any way n also has to escape to that place, thus inlining should be possible?
-// (I think in those places n will be replace by env.n where env is the environment of the thing that escapes with n in it)
+extern fun test (n:Nat, m:Nat) :I32 =
+    use core.ops.n;
 
-extern fun test (n:Nat) :I32 =
-
-    // create two lambdas with the same type, both having n free
-    let get1 = fn (x: Nat) : Idx n = return (core.idx 0 n x);
-    let get2 = fn (x: Nat) : Idx n = return (core.idx 0 n x);
+    // create two anonymous functions with the same type, both having n free in the type but also having other free var m in their bodies
+    let get1 = fn (x: Nat) : Idx n = return (core.idx 0 n (x + m));
+    let get2 = fn (x: Nat) : Idx n = return (core.idx 0 n (x * m));
 
     // a function to which we can pass the two functions above
     let apply = fn (f : Fn Nat → Idx n) : I32 =
@@ -45,4 +22,4 @@ extern fun test (n:Nat) :I32 =
     ret x = apply $ get1;
     ret y = apply $ get2;
 
-    return (x+y);
+    return (core.wrap.add 0 (x,y));

@@ -6,7 +6,10 @@ import pipeline;
 
 use core.ops.s.w;
 
-extern fun get (T:*, v:«2;T») : T = return v#0_2;
+// TODO: the return type must not depend on T, otherwise the call using ret doesn't work.
+
+extern fun poly_first (T:*, v:«2;T») : I32 = return 0I32;
 
 extern fun test(argc: I32): I32 =
-    get ((I32, (argc, argc)), return);
+    ret x = poly_first $ (I32, (argc, argc));
+    return x;
