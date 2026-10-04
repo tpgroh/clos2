@@ -6,8 +6,16 @@ import pipeline;
 
 use core.ops.s.w;
 
+// test dependent types in the argument
 extern fun get (m:Nat, x: Idx m) : I32 = return (core.bitcast I32 x);
 
+// also for the return continuation type, TODO: which is currently not allowed for the ret ... $ ... syntax ?
+extern fun get_wr (m:Nat) : Idx m = return (core.idx 0 m 1984);
+
+// just use every of the above functions
 extern fun test(m:Nat): I32 =
-    ret x = get $ (m, core.idx 0 m 1984);
-    return x;
+    con k (y: Idx m) =
+        ret x = get $ (m, y);
+        return x;
+
+    get_wr (m, k);
