@@ -1,0 +1,17 @@
+// RUN: %mim -I %S/.. %s -o -
+
+// `get` captures `arr` and `i`, whose types mention `n`, but never uses `n` itself.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+let Getter = Cn [mem.M 0, Cn [mem.M 0, I32]];
+
+extern con store_getter (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», i: Idx n, out: mem.Ptr0 Getter, return: Cn [mem.M 0]) =
+    con get (m: mem.M 0, k: Cn [mem.M 0, I32]) = k (mem.load (m, mem.lea (arr, i)));
+    return (mem.store (m, out, get));
+
+extern con store_setter (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», i: Idx n, out: mem.Ptr0 (Cn [mem.M 0, I32, Cn [mem.M 0]]), return: Cn [mem.M 0]) =
+    con set (m: mem.M 0, v: I32, k: Cn [mem.M 0]) = k (mem.store (m, mem.lea (arr, i), v));
+    return (mem.store (m, out, set));

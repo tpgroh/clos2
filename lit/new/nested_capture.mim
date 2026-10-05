@@ -1,0 +1,20 @@
+// RUN: %mim -I %S/.. %s -o -
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con call (m: mem.M 0, f: F, x: I32, return: Cn [mem.M 0, I32]) = f (m, x, return);
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    let a = argc;
+    con lvl1 (m: mem.M 0, b: I32, k1: Cn [mem.M 0, I32]) =
+        con lvl2 (m: mem.M 0, c: I32, k2: Cn [mem.M 0, I32]) =
+            con lvl3 (m: mem.M 0, d: I32, k3: Cn [mem.M 0, I32]) = k3 (m, a + b + c + d);
+            call (m, lvl3, 4I32, k2);
+        call (m, lvl2, 3I32, k1);
+    call (m, lvl1, 2I32, return);

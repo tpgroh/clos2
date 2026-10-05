@@ -1,0 +1,20 @@
+// RUN: %mim -I %S/.. %s -o -
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con compose (m: mem.M 0, f g: F, return: Cn [mem.M 0, F]) =
+    con fg (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) =
+        g (m, x, cn (m: mem.M 0, y: I32) = f (m, y, k));
+    return (m, fg);
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    con inc (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x + argc);
+    con dbl (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x * 2I32);
+    compose (m, inc, dbl, cn (m: mem.M 0, h: F) =
+        compose (m, h, h, cn (m: mem.M 0, hh: F) = hh (m, 3I32, return)));

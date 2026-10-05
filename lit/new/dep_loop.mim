@@ -1,0 +1,28 @@
+// RUN: %mim -I %S/.. %s -o -
+
+// A recursive loop and a per-element closure, both capturing `arr` whose type depends on `n`.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con map (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», f: F, return: Cn [mem.M 0]) =
+    con loop (m: mem.M 0, i: I32) =
+        con body (m: mem.M 0) =
+            let lea    = mem.lea (arr, core.conv.u n i);
+            let (m, v) = mem.load (m, lea);
+            f (m, v, cn (m: mem.M 0, w: I32) = loop (mem.store (m, lea, w), i + 1I32));
+        (return, body)#(i < core.bitcast I32 n) m;
+    loop (m, 0I32);
+
+extern con scale (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», factor: I32, return: Cn [mem.M 0]) =
+    con mul (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x * factor);
+    map (m, n, arr, mul, return);
+
+extern con scale_twice (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», factor: I32, return: Cn [mem.M 0]) =
+    con mul (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x * factor);
+    map (m, n, arr, mul, cn (m: mem.M 0) = map (m, n, arr, mul, return));

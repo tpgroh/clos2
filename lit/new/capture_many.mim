@@ -1,0 +1,23 @@
+// RUN: %mim -I %S/.. %s -o -
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con run (m: mem.M 0, f: F, return: Cn [mem.M 0, I32]) = f (m, 1I32, return);
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    let (m, ptr) = mem.alloc (I32, 0) m;
+    let m        = mem.store (m, ptr, 5I32);
+    let pair     = (argc, 7I32);
+
+    con body (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) =
+        let (m, v) = mem.load (m, ptr);
+        let (a, b) = pair;
+        k (m, x + v + a + b);
+
+    run (m, body, return);

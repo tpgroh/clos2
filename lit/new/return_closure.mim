@@ -1,0 +1,27 @@
+// RUN: %mim -I %S/.. %s -o -
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let Adder = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con make_adder (m: mem.M 0, x: I32, return: Cn [mem.M 0, Adder]) =
+    con add (m: mem.M 0, y: I32, return: Cn [mem.M 0, I32]) = return (m, x + y);
+    return (m, add);
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    make_adder (m, argc, got_add1)
+    where
+        con got_add1 (m: mem.M 0, add1: Adder) =
+            make_adder (m, 20I32, got_add2)
+            where
+                con got_add2 (m: mem.M 0, add2: Adder) =
+                    add1 (m, 5I32, after1)
+                    where
+                        con after1 (m: mem.M 0, r: I32) = add2 (m, r, return);
+                    end;
+            end;
+    end;

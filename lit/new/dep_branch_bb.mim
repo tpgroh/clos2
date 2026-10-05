@@ -1,0 +1,21 @@
+// RUN: %mim -I %S/.. %s -o -
+
+// Basic blocks with dependently typed domains used as branch targets and as first-class values.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+extern con pick (m: mem.M 0, n: Nat, i j: Idx n, c: Bool, return: Cn [mem.M 0, Idx n]) =
+    con choose (m: mem.M 0, k: Cn [mem.M 0, Idx n]) =
+        (snd, fst)#c (m, k)
+        where
+            con fst (m: mem.M 0, k: Cn [mem.M 0, Idx n]) = k (m, i);
+            con snd (m: mem.M 0, k: Cn [mem.M 0, Idx n]) = k (m, j);
+        end;
+    choose (m, return);
+
+extern con stash (m: mem.M 0, n: Nat, i: Idx n, slot: mem.Ptr0 (Cn [mem.M 0, Idx n]), return: Cn [mem.M 0, Idx n]) =
+    let m      = mem.store (m, slot, return);
+    let (m, k) = mem.load (m, slot);
+    k (m, i);

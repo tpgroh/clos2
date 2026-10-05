@@ -1,0 +1,18 @@
+// RUN: %mim -I %S/.. %s -o -
+
+// The free var `n` only occurs below type-level arithmetic.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+extern con store_last (m: mem.M 0, n: Nat, arr: mem.Ptr0 «core.nat.add (n, 1); I32», out: mem.Ptr0 (Cn [mem.M 0, Cn [mem.M 0, I32]]), return: Cn [mem.M 0]) =
+    con last (m: mem.M 0, k: Cn [mem.M 0, I32]) =
+        let i = core.conv.u (core.nat.add (n, 1)) (core.bitcast I32 n);
+        k (mem.load (m, mem.lea (arr, i)));
+    return (mem.store (m, out, last));
+
+extern con store_dbl (m: mem.M 0, n: Nat, out: mem.Ptr0 (Cn [mem.M 0, Idx n, Cn [mem.M 0, Idx (core.nat.mul (n, 2))]]), return: Cn [mem.M 0]) =
+    con dbl (m: mem.M 0, i: Idx n, k: Cn [mem.M 0, Idx (core.nat.mul (n, 2))]) =
+        k (m, core.conv.u (core.nat.mul (n, 2)) i);
+    return (mem.store (m, out, dbl));

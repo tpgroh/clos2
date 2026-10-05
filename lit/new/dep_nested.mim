@@ -1,0 +1,16 @@
+// RUN: %mim -I %S/.. %s -o -
+
+// `inner`'s type mentions `k` from `outer` and `n` from `store_outer`.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+lam Inner (n k: Nat): * = Cn [mem.M 0, Idx k, Cn [mem.M 0, [Idx n, Idx k]]];
+lam Outer (n: Nat):   * = Cn [mem.M 0, k: Nat, Cn [mem.M 0, Inner (n, k)]];
+
+extern con store_outer (m: mem.M 0, n: Nat, x: Idx n, out: mem.Ptr0 (Outer n), return: Cn [mem.M 0]) =
+    con outer (m: mem.M 0, k: Nat, cont: Cn [mem.M 0, Inner (n, k)]) =
+        con inner (m: mem.M 0, y: Idx k, c: Cn [mem.M 0, [Idx n, Idx k]]) = c (m, (x, y));
+        cont (m, inner);
+    return (mem.store (m, out, outer));

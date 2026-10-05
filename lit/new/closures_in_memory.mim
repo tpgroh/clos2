@@ -1,0 +1,29 @@
+// RUN: %mim -I %S/.. %s -o -
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    let (m, arr) = mem.alloc («4; F», 0) m;
+
+    con sum (m: mem.M 0, i: I32, acc: I32) =
+        con step (m: mem.M 0) =
+            let (m, f) = mem.load (m, mem.lea (arr, core.conv.u 4 i));
+            f (m, acc, cn (m: mem.M 0, acc: I32) = sum (m, i + 1I32, acc));
+        con done (m: mem.M 0) = return (m, acc);
+        (done, step)#(i < 4I32) m;
+
+    con fill (m: mem.M 0, i: I32) =
+        con add_i (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x + i * argc);
+        con store (m: mem.M 0) =
+            let m = mem.store (m, mem.lea (arr, core.conv.u 4 i), add_i);
+            fill (m, i + 1I32);
+        con done (m: mem.M 0) = sum (m, 0I32, 0I32);
+        (done, store)#(i < 4I32) m;
+
+    fill (m, 0I32);
