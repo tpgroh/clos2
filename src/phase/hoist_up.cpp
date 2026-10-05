@@ -134,15 +134,26 @@ const Def* HoistUp::rewrite_imm_App(const App* app) {
     if (is_bootstrapping() || app->callee()->isa<App>() || app->callee_type()->is_closed())
         return RWPhase::rewrite_imm_App(app);
 
-    auto new_callee = rewrite(app->callee());
-    auto fvs        = getFreeTypeVars(app->callee_type());
+    log().d("app {}:{} = ({}:{}) ({}:{}) ", app, app->type(), app->callee(), app->callee_type(), app->arg(),
+            app->arg()->type());
+
+    // rewrite free vars first
+    auto fvs = getFreeTypeVars(app->callee_type());
     DefVec new_arg{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
+    for (size_t i = 0; i < fvs.size(); i++)
+        log().d("push fv {} ~> {} as the {}'th argument'", fvs[i], new_arg[i], i);
+
+    // and the arguments. which are preceded by the lambda lifted free vars
     for (auto a : app->args())
         new_arg.emplace_back(rewrite(a));
 
+    // now rewrite callee
+    auto new_callee = rewrite(app->callee());
+
     log().d("app {}", app);
     log().d("  callee {}:{}", new_callee, new_callee->type());
-    log().d("  args {}:{}", new_arg, w.tuple(new_arg)->type());
+    auto new_args = w.tuple(new_arg);
+    log().d("  args {}:{}", new_args, new_args->type());
 
     auto new_app = w.app(new_callee, new_arg);
 

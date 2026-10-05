@@ -1,0 +1,24 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+plugin mem;
+
+import pipeline;
+
+use core.ops.s.w;
+
+// Case 1: anonymous fn escapes by being returned directly.
+extern fun make_offset (base: I32): Fn I32 -> I32 =
+    return (fn (x: I32) = return (x + base));
+
+// Case 2: anonymous fn escapes by being stored into a memory slot.
+extern fun store_offset (m: mem.M 0, base: I32, slot: mem.Ptr0 (Fn I32 -> I32)): mem.M 0 =
+    return (mem.store (m, slot, fn (x: I32) = return (x + base)));
+
+// Case 3: anonymous fn escapes by being passed to a higher-order function that stores it.
+extern fun install (m: mem.M 0, f: Fn I32 -> I32, slot: mem.Ptr0 (Fn I32 -> I32)): mem.M 0 =
+    return (mem.store (m, slot, f));
+
+extern fun make_and_install (m: mem.M 0, base: I32, slot: mem.Ptr0 (Fn I32 -> I32)): mem.M 0 =
+    ret m = install $ (m, fn (x: I32) = return (x + base), slot);
+    return m;

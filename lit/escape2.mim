@@ -1,0 +1,19 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+
+import pipeline;
+
+use core.ops.s.w;
+
+// Case 4: anonymous fn escapes transitively — captured by an outer fn that itself escapes.
+extern fun make_composed (base shift: I32): Fn I32 -> I32 =
+    let f = fn (x: I32) = return (x + base);
+    return (fn (y: I32) = ret z = f $ (y + shift); return z);
+
+// Case 5: anonymous fn escapes packed inside a tuple.
+extern fun make_pair (base1 base2: I32): [Fn I32 -> I32, Fn I32 -> I32] =
+    return (fn (x: I32) = return (x + base1), fn (x: I32) = return (x + base2));
+
+extern fun make_tagged (tag base: I32): [I32, Fn I32 -> I32] =
+    return (tag, fn (x: I32) = return (x + base));

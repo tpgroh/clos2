@@ -1,0 +1,22 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+plugin mem;
+
+import pipeline;
+
+use core.ops.s.w;
+
+extern fun store_fn (m: mem.M 0, base: I32, slot: mem.Ptr0 (Fn I32 -> I32)): mem.M 0 =
+    return (mem.store (m, slot, fn (x: I32) = return (x + base)));
+
+extern fun call_fn (m: mem.M 0, slot: mem.Ptr0 (Fn I32 -> I32), arg: I32): [mem.M 0, I32] =
+    let (m, f) = mem.load (m, slot);
+    ret r = f $ arg;
+    return (m, r);
+
+extern fun store_and_call (m: mem.M 0, base arg: I32): [mem.M 0, I32] =
+    let (m, slot) = mem.alloc (Fn I32 -> I32, 0) m;
+    ret m = store_fn $ (m, base, slot);
+    ret (m,y) = call_fn $ (m, slot, arg);
+    return (m, y);
