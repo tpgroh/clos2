@@ -69,6 +69,14 @@ At this point I'm thinking in two directions.
    free inside the lambda's type and depends on anything which is free inside
    the lambda's type.
 
+Ideas that did not make it.
+3. select the right n in the application rewrite.
+   - this is not possible. In the above example I would just have to add
+     another argument that gets passed which is from another scope than j but
+     also depends on n. then I would have to pass n from both scopes (not
+     possible) or tell the type system that they are equal (again the old
+     problem)
+
 ### future plan
 1. use Idea 1
     - this removes all nesting problems
