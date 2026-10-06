@@ -14,5 +14,11 @@ import compile;
 /// ## Operations
 ///
 /// ## Phases
+
+priv mod anno {
+    anx lam closure {T:*} (x:T) : T = x;
+}
+
 axm hoist_up: compile.Phase;
+axm lam_lift_type: compile.Phase;
 axm clos_conv: compile.Phase;

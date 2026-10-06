@@ -1,4 +1,4 @@
-#include "mim/plug/clos2/phase/hoist_up.h"
+#include "mim/plug/clos2/phase/lam_lift_type.h"
 
 #include "mim/def.h"
 #include "mim/phase.h"
@@ -7,7 +7,7 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-DefVec HoistUp::getFreeTypeVars(const Def* type) {
+DefVec LamLiftType::getFreeTypeVars(const Def* type) {
     // TODO: order the free vars in a deterministic way which only depends on the type.
     // For example the order in which they would appear in the written version of the IL
 
@@ -18,7 +18,7 @@ DefVec HoistUp::getFreeTypeVars(const Def* type) {
 }
 
 template<bool ismut>
-const Def* HoistUp::hoistUp(const Lam* lam) {
+const Def* LamLiftType::hoistUp(const Lam* lam) {
     auto& w = new_world();
 
     push();
@@ -65,7 +65,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
 // TODO: if I limit this for continuations I can make the transformation simpler
 template<bool ismut>
-const Def* HoistUp::hoistUp(const Pi* pi) {
+const Def* LamLiftType::hoistUp(const Pi* pi) {
     auto& w = new_world();
 
     push();
@@ -124,7 +124,7 @@ const Def* HoistUp::hoistUp(const Pi* pi) {
     return new_pi;
 }
 
-const Def* HoistUp::rewrite_imm_App(const App* app) {
+const Def* LamLiftType::rewrite_imm_App(const App* app) {
     auto& w = new_world();
 
     // foo bar ~> foo' (z_i..., bar')
@@ -162,26 +162,26 @@ const Def* HoistUp::rewrite_imm_App(const App* app) {
     return new_app;
 }
 
-const Def* HoistUp::rewrite_mut_Pi(Pi* pi) {
+const Def* LamLiftType::rewrite_mut_Pi(Pi* pi) {
     if (is_bootstrapping() || pi->is_closed()) return RWPhase::rewrite_mut_Pi(pi);
 
     return map(pi, hoistUp<true>(pi));
 }
 
-const Def* HoistUp::rewrite_imm_Pi(const Pi* pi) {
+const Def* LamLiftType::rewrite_imm_Pi(const Pi* pi) {
     if (is_bootstrapping() || pi->is_closed()) return RWPhase::rewrite_imm_Pi(pi);
 
     // this will be maped by rewrite_immutable
     return hoistUp<false>(pi);
 }
 
-const Def* HoistUp::rewrite_imm_Lam(const Lam* old_lam) {
+const Def* LamLiftType::rewrite_imm_Lam(const Lam* old_lam) {
     if (is_bootstrapping() || old_lam->type()->is_closed()) return RWPhase::rewrite_imm_Lam(old_lam);
 
     return hoistUp<false>(old_lam);
 }
 
-const Def* HoistUp::rewrite_mut_Lam(Lam* old_lam) {
+const Def* LamLiftType::rewrite_mut_Lam(Lam* old_lam) {
     if (is_bootstrapping() || old_lam->type()->is_closed()) return RWPhase::rewrite_mut_Lam(old_lam);
 
     return map(old_lam, hoistUp<true>(old_lam));

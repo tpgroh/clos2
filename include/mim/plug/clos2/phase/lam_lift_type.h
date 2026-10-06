@@ -22,9 +22,9 @@
 
 namespace mim::plug::clos2 {
 
-class HoistUp : public RWPhase {
+class LamLiftType : public RWPhase {
 public:
-    HoistUp(World& world, flags_t annex)
+    LamLiftType(World& world, flags_t annex)
         : RWPhase(world, annex) {}
 
 private:
