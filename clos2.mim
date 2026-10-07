@@ -15,9 +15,7 @@ import compile;
 ///
 /// ## Phases
 
-priv mod anno {
-    anx lam closure {T:*} (x:T) : T = x;
-}
+priv axm anno.(closure): {T:*} → T → T, normalize_anno;
 
 axm hoist_up: compile.Phase;
 axm lam_lift_type: compile.Phase;
