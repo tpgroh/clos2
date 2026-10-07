@@ -7,18 +7,6 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
-// FIXME: This is currently only used to get the new gid's of Def's after the cleanup phase.
-// Either do something useful or remove it
-bool ClosConv::analyze() {
-    auto& w = old_world();
-
-    log().i("this is what reached clos2");
-    w.dump();
-    // w.dot("middle.dot");
-
-    return false;
-}
-
 Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam) {
     log().i("CC {} closing", old_lam);
 

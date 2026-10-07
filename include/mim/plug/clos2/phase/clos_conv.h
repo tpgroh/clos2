@@ -23,7 +23,6 @@ private:
     Lam* get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam);
     void rewrite_procedure_body(const Lam* old_lam);
 
-    bool analyze() final;
     void rewrite_external(Def*) final;
     const Def* rewrite_mut_Lam(Lam*) final;
     const Def* rewrite_imm_Lam(const Lam*) final;
