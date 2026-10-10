@@ -12,10 +12,12 @@ extern lam _compile(): compile.Phase =
         // TODO: uncomment
         compile.named "cps.conv",
 
-        // lambda lift free vars in the type of lambdas.
-        // this ensures that lambdas dont have free vars in their type, as required by clos_conv
         compile.named "clos2.hoist_up",
 
+        // lambda lift free vars in the type of lambdas.
+        // this ensures that lambdas dont have free vars in their type, as required by clos_conv
+        compile.named "clos2.lam_lift_type",
+
         // closure convert every lambda.
-        compile.named "clos2.clos_conv",
+        //compile.named "clos2.clos_conv",
     );
