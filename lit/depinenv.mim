@@ -1,0 +1,11 @@
+// RUN: %mim -I %S %s -o -
+
+plugin core;
+
+import pipeline;
+
+use core.ops.s.w;
+
+extern fun make_adder (m: Nat, n: Idx m) : Fn Idx m → Idx m =
+    let f = fn (x: Idx m) = return (x + n);
+    return f;
