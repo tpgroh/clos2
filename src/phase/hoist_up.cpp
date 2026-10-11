@@ -165,8 +165,8 @@ void HoistUp::finalize() {
 }
 
 const Def* HoistUp::rewrite_mut_Lam(Lam* lam) {
-    if (is_bootstrapping() || lam->is_external()) {
-        push();
+    if (lam->is_external()) {
+        push(); // TODO: why did I put those here
         auto new_mut = RWPhase::rewrite_mut_Lam(lam);
         pop();
         return map(lam, new_mut);
@@ -176,8 +176,8 @@ const Def* HoistUp::rewrite_mut_Lam(Lam* lam) {
 }
 
 const Def* HoistUp::rewrite_imm_Lam(const Lam* lam) {
-    if (is_bootstrapping() || lam->is_external()) {
-        push();
+    if (lam->is_external()) {
+        push(); // TODO: why did I put those here
         auto new_imm = RWPhase::rewrite_imm_Lam(lam);
         pop();
         return new_imm;

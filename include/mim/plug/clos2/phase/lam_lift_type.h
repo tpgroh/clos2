@@ -25,7 +25,7 @@ private:
     // the only lambdas that we have to modify are nested in a procedure lam.
     // we detect those using by checking that the type is not a continuation Pi.
     const Def* rewrite_mut_Lam(Lam* lam) final {
-        if (is_bootstrapping() || Pi::isa_cn(lam->type())) return RWPhase::rewrite_mut_Lam(lam);
+        if (Pi::isa_cn(lam->type())) return RWPhase::rewrite_mut_Lam(lam);
         return lift_lam(lam);
     }
 
@@ -34,18 +34,18 @@ private:
     // introduced with the last phase.
     // TODO: if this is not correct I would add a new annotation for the type of procedures to detect and skip those here
     const Def* rewrite_mut_Pi(Pi* pi) final {
-        if (is_bootstrapping() || pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_mut_Pi(pi);
+        if (pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_mut_Pi(pi);
         return map(pi, lift_pi(pi));
     }
 
     const Def* rewrite_imm_Pi(const Pi* pi) final {
-        if (is_bootstrapping() || pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_imm_Pi(pi);
+        if (pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_imm_Pi(pi);
         return lift_pi(pi);
     }
 
     // here I can skip every application that is closed and those that come from the partial application 
     const Def* rewrite_imm_App(const App* app) final {
-        if (is_bootstrapping() || !Pi::isa_cn(app->callee_type())) return RWPhase::rewrite_imm_App(app);
+        if (!Pi::isa_cn(app->callee_type())) return RWPhase::rewrite_imm_App(app);
 
         log().i("rewrite app ({}:{})({}:{})", app->callee(), app->callee_type(), app->arg(), app->arg()->type());
 
