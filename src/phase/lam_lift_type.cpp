@@ -69,7 +69,7 @@ const Def* LamLiftType::lift_pi(const Pi* pi) {
     new_pi->set_dom(sig);
 
     // TODO: I have to check if all remaps are already above.
-    new_pi->set_codom(w.type_bottom());
+    new_pi->set_codom(w.type_bot());
 
     if (new_pi->is_immutabilizable()) new_pi->immutabilize();
 
@@ -86,7 +86,7 @@ const Def* LamLiftType::lift_app(const App* app) {
     // foo bar ~> foo' (z_i..., bar')
 
     auto callee = rewrite(app->callee());
-    auto fvs = getFreeTypeVars(callee->type());
+    auto fvs = getFreeTypeVars(app->callee_type());
 
     DefVec new_args{};
     new_args.reserve(app->num_args() + fvs.size());
@@ -94,5 +94,57 @@ const Def* LamLiftType::lift_app(const App* app) {
     for (auto f : fvs) new_args.push_back(rewrite(f));
     for (auto a : app->args()) new_args.push_back(rewrite(a));
 
+    log().d("old callee {}:{}", app->callee(), app->callee_type());
+    log().d("old args {}", app->args());
+    log().d("new callee {}:{}", callee, callee->type());
+    log().d("new args {}", new_args);
+
     return w.app(callee, new_args)->set(app->dbg_key());
+}
+
+const Def* LamLiftType::lift_lam(Lam* lam) {
+    auto& w = new_world();
+
+    // unpack the wrapped lambda
+    auto wlam = lam->body()->as<Lam>();
+
+    // check if there is anything to lift. otherwise bail
+    // TODO: the nested if could be constexpr with a template var
+    if (wlam->type()->is_closed()) return RWPhase::rewrite_mut_Lam(lam);
+    auto fvs = getFreeTypeVars(wlam->type());
+
+    log().i("found procedure {} of {} with free type vars {}", lam, wlam, fvs);
+    log().i("procedure {} of type {}", lam, lam->type());
+
+    // now rewrite the outer lambda
+    // we drop every dom that is in the fvs
+
+    auto new_pi = rewrite(lam->type())->as<Pi>();
+    auto new_lam = w.mut_lam(new_pi);
+    auto inner_pi = new_pi->reduce(new_lam->var())->as<Pi>();
+    auto new_wlam = w.mut_lam(inner_pi);
+
+    // set debug keys
+    new_lam->set(lam->dbg_key());
+    new_wlam->set(wlam->dbg_key());
+
+    // map vars and the outer lam
+    map(lam, new_lam);
+    push();
+    map(wlam, new_wlam);
+
+    map(lam->var(), new_lam->var());
+    for (size_t i = 0; i < fvs.size(); i++)
+        map(fvs[i], new_wlam->var(new_wlam->num_vars(), i));
+    if (auto mut = wlam->isa_mut<Lam>())
+        map(mut->var(), DefVec{mut->num_vars(), [&](auto i){ return new_wlam->var(new_wlam->num_vars(), i + fvs.size()); }});
+
+    new_wlam->set(rewrite(wlam->filter()), rewrite(wlam->body()));
+    new_lam->set(false, new_wlam);
+
+    pop();
+
+    log().i("rewrote procedure {} of type {} to {} of type {}", lam, lam->type(), new_lam, new_lam->type());
+
+    return new_lam;
 }

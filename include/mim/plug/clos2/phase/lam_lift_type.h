@@ -4,8 +4,8 @@
 #include "mim/lam.h"
 #include "mim/phase.h"
 
-#include "mim/plug/clos2/autogen.h"
 #include "mim/plug/clos2/fv.h"
+#include "mim/plug/clos2/autogen.h"
 
 namespace mim::plug::clos2 {
 
@@ -18,26 +18,21 @@ private:
     // get deterministic ordering of free vars in @p type
     DefVec getFreeTypeVars(const Def* type);
 
-    const Def* lift_lam(const Lam*);
+    const Def* lift_lam(Lam*);
     const Def* lift_pi(const Pi*);
     const Def* lift_app(const App*);
 
-    // I have to detect if a lam is from the curryed application of a closure or not.
-    // currently I'm assuming that we are working with a CPS world thus every lam which is not a continuation was introduced by the previous phase and thus 
-    // it is a lam that comes from curryed application.
-
-    const Def* rewrite_imm_Lam(const Lam* lam) final {
-        if (is_bootstrapping() || !Pi::isa_cn(lam->type()) return RWPhase::rewrite_imm_Lam(lam);
-
-        return lift_lam(lam);
-    }
-
+    // the only lambdas that we have to modify are nested in a procedure lam.
+    // we detect those using by checking that the type is not a continuation Pi.
     const Def* rewrite_mut_Lam(Lam* lam) final {
-        if (is_bootstrapping() || !Pi::isa_cn(lam->type()) return RWPhase::rewrite_mut_Lam(lam);
-
+        if (is_bootstrapping() || Pi::isa_cn(lam->type())) return RWPhase::rewrite_mut_Lam(lam);
         return lift_lam(lam);
     }
 
+    // to skip the Pi type of procedures Im just checking if the pi is a continuation.
+    // before this plugin Im running the cps conversion phase thus the only pi types remaining should be those that I
+    // introduced with the last phase.
+    // TODO: if this is not correct I would add a new annotation for the type of procedures to detect and skip those here
     const Def* rewrite_mut_Pi(Pi* pi) final {
         if (is_bootstrapping() || pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_mut_Pi(pi);
         return map(pi, lift_pi(pi));
@@ -48,11 +43,15 @@ private:
         return lift_pi(pi);
     }
 
+    // here I can skip every application that is closed and those that come from the partial application 
     const Def* rewrite_imm_App(const App* app) final {
-        if (is_bootstrapping() || app->is_closed()) return RWPhase::rewrite_imm_App(app);
+        if (is_bootstrapping() || !Pi::isa_cn(app->callee_type())) return RWPhase::rewrite_imm_App(app);
+
+        log().i("rewrite app ({}:{})({}:{})", app->callee(), app->callee_type(), app->arg(), app->arg()->type());
 
         // skip annotation
-        if (auto a = Axm::isa<anno>(app)) return RWPhase::rewrite_imm_App(app);
+        if (auto a = Axm::isa<anno>(app))
+            return RWPhase::rewrite_imm_App(app);
 
         return lift_app(app);
     }
