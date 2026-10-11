@@ -40,7 +40,11 @@ private:
 
 private:
     // TODO: should I use fe::Queuelike instead?
-    std::queue<const Lam*> worklist_ = {};
+    struct Stub {
+        const Lam* lam;
+        const DefVec fvs;
+    };
+    std::queue<Stub> worklist_ = {};
     DefMap<Lam*> outerlams_          = {};
     FVAnalysis fvana_                = {};
 };
