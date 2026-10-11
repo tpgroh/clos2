@@ -31,6 +31,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     auto fvset       = fvana_.free_vars(lam);
     auto fvs         = DefVec{fvset.begin(), fvset.end()};
+    std::ranges::sort(fvs, GIDLt<const Def*>());
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
@@ -39,9 +40,21 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     }
 
     // create pi for outer lambda
-    // FIXME: use actual type, (umax)
+    // TODO: use actual type, (umax of fvs + ? ) ; it should be the same as the kind of lam???
     auto outer_pi = w.mut_pi(w.type(), false);
-    outer_pi->set_dom(w.tuple(environment)->type());
+    if (auto sig = w.tuple(environment)->type(); sig->is_closed())
+        outer_pi->set_dom(sig);
+    else {
+        auto outer_sig = w.mut_sigma(rewrite(old_world().umax<UMax::Term>(fvs)), fvs.size());
+        auto subst = Rewriter(w);
+        for (size_t i = 0; i < fvs.size(); i++) {
+            outer_sig->set(i, subst.rewrite(environment[i]->type()));
+            subst.map(environment[i], outer_sig->var(fvs.size(), i));
+        }
+        assert(!outer_sig->is_immutabilizable());
+        if (outer_sig->is_immutabilizable()) outer_sig->immutabilize();
+        outer_pi->set_dom(outer_sig);
+    }
 
     // rewrite codom then substitue free vars
     auto wrong_inner_pi = rewrite(lam->type())->as<Pi>();
@@ -74,13 +87,14 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we have to to the actual rewrite after we have cleared the old2new mappings
     // because it might introduce new free vars (when something was already indirectly mapped, for example extractions
     // of something)
-    worklist_.emplace(lam);
+    worklist_.emplace(lam, fvs);
     outerlams_[lam] = outer_lam;
 
     log().i("hoistup {} ~> {}:{} with free vars {}", lam, outer_lam, outer_lam->type(), outer_lam->free_vars());
 
-    if (!outer_lam->is_closed())
-        outer_lam->blame("outer_lam is not closed, has free vars {}", outer_lam->free_vars()).report();
+    // this checks that the type is now closed
+    if (!outer_lam->type()->is_closed())
+        outer_lam->blame("outer_lam's type is not closed, has free vars {}", outer_lam->type()->free_vars()).bail();
 
     pop();
 
@@ -96,11 +110,12 @@ void HoistUp::finalize() {
     auto& w = new_world();
 
     while (!worklist_.empty()) {
-        auto lam = worklist_.front();
+        auto stub = worklist_.front();
         worklist_.pop();
+        
+        auto& lam = stub.lam;
+        auto& fvs = stub.fvs;
 
-        auto fvset     = fvana_.free_vars(lam); // I expect the iterator of this set to still have the same ordering
-        auto fvs       = DefVec{fvset.begin(), fvset.end()};
         auto outer_lam = outerlams_.at(lam);
         auto inner_lam = outer_lam->body()->as_mut<Lam>();
 
@@ -143,8 +158,9 @@ void HoistUp::finalize() {
 
         pop();
 
+        // this checks that the body doesnt contain free vars
         if (!outer_lam->is_closed())
-            outer_lam->blame("outer_lam is not closed, has free vars {}", outer_lam->free_vars()).report();
+            outer_lam->blame("outer_lam is not closed, has free vars {}", outer_lam->free_vars()).bail();
     }
 }
 
