@@ -89,3 +89,45 @@ Ideas that did not make it.
     - the environment has to be the last argument of the procedure as its type might depend on the previous arguments.
 3. use existential representation to hide the environment
     - this should now be possible
+
+#### 3.2 - does not work as I wanted - write up by claude
+**Idea.** Lift a free var of `f`'s *type* to an extra parameter passed at every call site, so
+the type closes and the existing `[Env: *, Cn [Env, …], Env]` representation still works.
+
+**Why it fails.** Lifting turns a dependency into a coincidence. Source:
+
+```mim
+extern fun make_adder (m: Nat, n: Idx m): Fn Idx m → Idx m =
+    let f = fn (x: Idx m) = return (x + n);
+    return f;
+```
+
+After lifting `m` out of `f`'s type:
+
+```mim
+con f (m: Nat, n: Idx m) as _1@(ff) (m_1: Nat, x: Idx m_1, return_1: Cn [Nat, Idx m_1]) as _2 =
+    let _3 = core.wrap.add 0 @ m_1 (n, x);   // n : Idx m, but x : Idx m_1
+    return_1 (m_1, _3);
+
+extern fun make_adder (_4: [m: Nat, Idx m])
+    : [m_2: Nat, Cn [m_3: Nat, Idx m_3, Cn [m_4: Nat, Idx m_3]]] = …
+```
+
+The `add` is well-typed only under `m ≡ m_1`, which nothing in the type records — the lifted
+parameter is unconstrained. The same break reappears at the use site: the result advertises
+*every* `m_3`, while the code works only for `m_3 = _4#0`, and `m_2` is never tied to `m_3`.
+
+Singletons do not repair it: `m_1: «m»` is transparent (`#m_1` normalizes back to `m`, the
+binder never occurs in the body), so the free var is re-spelled, not removed; over a concrete
+`m` it also pins the closure type. The variant that would work, `«env#0»`, is unwritable in
+the closure type, where only `Env : *` is in scope — never an environment *value*.
+
+**Conclusion.** The free variable belongs to the enclosing context, not to the signature:
+closure conversion rewrites the *body*, never the type. So `f`'s converted type keeps `m`
+free, and the closure representation is allowed to carry free vars in its type.
+
+### Idea 4
+use Idea 1 (the 2018 papers transformation) - here I'll use my implementation of Idea 3.
+this hoists up every (in the future only selected) lambda(s) while annotating important parts for later phases.
+I should add another annotation phase or update the above one to also annotate use sites/etc instead of only construction sites.
+Then a phase that works on that but simply ignoring free vars in the type.
