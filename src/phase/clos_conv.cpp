@@ -127,16 +127,25 @@ const Def* ClosConv::rewrite_procedure(Axm::IsA<anno, App> annotated) {
     log().i("lam {}:{}", old_lam, old_lam->type());
     log().i("env {}:{}", old_env, old_env->type());
 
-    auto dom = w.mut_sigma(rewrite(old_proc->type()->type()), 2);
-    dom->set(0, rewrite(old_proc->dom()));
-    dom->set(1, rewrite(old_lam->dom()));
-    auto proc = w.mut_con(dom);
-    push();
-    map(old_proc->var(), proc->var(2,0));
-    if (auto mlam = old_lam->isa_mut<Lam>())
-        map(mlam->var(), proc->var(2,1));
-    proc->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
-    pop();
+    Lam* proc;
+    if (auto it = procedures_.find(old_proc); it != procedures_.end())
+        proc = it->second;
+    else {
+        auto dom = w.mut_sigma(rewrite(old_proc->type()->type()), 2);
+        dom->set(0, rewrite(old_proc->dom()));
+        dom->set(1, rewrite(old_lam->dom()));
+        proc = w.mut_con(dom);
+        proc->set(old_proc->dbg_key());
+
+        procedures_[old_proc] = proc;
+
+        push();
+        map(old_proc->var(), proc->var(2,0));
+        if (auto mlam = old_lam->isa_mut<Lam>())
+            map(mlam->var(), proc->var(2,1));
+        proc->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
+        pop();
+    }
 
     return Closure::pack(proc, rewrite(old_env), rewrite(old_lam->dom()));
 }

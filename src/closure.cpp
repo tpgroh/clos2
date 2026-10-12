@@ -18,7 +18,7 @@ const Def* Closure::closure_type(const Def* dom) {
     sig->var(3, 0)->set("N");
     sig->var(3, 1)->set("n");
     sig->var(3, 2)->set("p");
-    // sig->set("closure");
+    sig->set("closure");
 
     return sig;
 }

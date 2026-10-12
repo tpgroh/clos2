@@ -47,13 +47,16 @@ private:
         auto new_callee = rewrite(app->callee());
 
         // if the callee is not a Pi then it is a closure
-        if (!new_callee->type()->isa<Pi>())
+        if (!new_callee->type()->isa<Pi>()) {
+            log().i("detected callee {} to be a closure", new_callee->type());
             return Closure::closure_apply(new_callee, new_arg);
+        }
 
         return RWPhase::rewrite_imm_App(app);
     }
 
     FVAnalysis fvana_{};
+    DefMap<Lam*> procedures_{};
 };
 
 } // namespace mim::plug::clos2
