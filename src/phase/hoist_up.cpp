@@ -36,7 +36,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
         log().i("reuse {} ~> {}", lam, it->second);
-        return w.app(it->second, environment);
+        return annotate(w.app(it->second, environment), anno::closure);
     }
 
     // create pi for outer lambda
