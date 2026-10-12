@@ -5,20 +5,7 @@
 #include "mim/phase.h"
 
 #include "mim/plug/clos2/fv.h"
-
-// NOTE:
-// This phase should lambda lift free vars in types of lambdas.
-// for this to work I require a deterministic and unambiguous way to order free vars. (TODO)
-// some notes I made before I started implementing. (require rewrite an such)
-// in general this is not usable for closures, as there the environment also contains free vars that might not
-// appear in the type. the typical example of `use` + `get` functions where `use` takes a function (with the same
-// type as `get`) shows why this cannot be deterministic. `use` cannot know which function will be passed to it.
-// thus we cannot make any assumptions about the ordering of the environment in the type of the procedure of `use`.
-// actually this example also shows that there is no possible closure transformation based on existentials of `use
-// get` when we say `get:Idx n -> bot` where `n` is free. here we would not know where `n` would be in the
-// environment of the given closure of the `get` like function. the solution I'm proposing is, that we lambda lift
-// the free vars of the type before the closure conversion. this eliminates both above mentioned problems but it
-// most likely limits us in when we can do this
+#include "mim/plug/clos2/autogen.h"
 
 namespace mim::plug::clos2 {
 
@@ -31,21 +18,43 @@ private:
     // get deterministic ordering of free vars in @p type
     DefVec getFreeTypeVars(const Def* type);
 
-    // TODO: currently the template vars are not required. I should just remove them after cleaning up the code
+    const Def* lift_lam(Lam*);
+    const Def* lift_pi(const Pi*);
+    const Def* lift_app(const App*);
 
-    // lambda lift @p lam
-    template<bool ismut>
-    const Def* hoistUp(const Lam* lam);
+    // the only lambdas that we have to modify are nested in a procedure lam.
+    // we detect those using by checking that the type is not a continuation Pi.
+    const Def* rewrite_mut_Lam(Lam* lam) final {
+        if (Pi::isa_cn(lam->type())) return RWPhase::rewrite_mut_Lam(lam);
+        return lift_lam(lam);
+    }
 
-    // add extra domain vars to @p pi to make free vars in the type explicit
-    template<bool ismut>
-    const Def* hoistUp(const Pi* pi);
+    // to skip the Pi type of procedures Im just checking if the pi is a continuation.
+    // before this plugin Im running the cps conversion phase thus the only pi types remaining should be those that I
+    // introduced with the last phase.
+    // TODO: if this is not correct I would add a new annotation for the type of procedures to detect and skip those here
+    const Def* rewrite_mut_Pi(Pi* pi) final {
+        if (pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_mut_Pi(pi);
+        return map(pi, lift_pi(pi));
+    }
 
-    const Def* rewrite_mut_Pi(Pi*) final;
-    const Def* rewrite_imm_Pi(const Pi*) final;
-    const Def* rewrite_mut_Lam(Lam*) final;
-    const Def* rewrite_imm_Lam(const Lam*) final;
-    const Def* rewrite_imm_App(const App*) final;
+    const Def* rewrite_imm_Pi(const Pi* pi) final {
+        if (pi->is_closed() || !Pi::isa_cn(pi)) return RWPhase::rewrite_imm_Pi(pi);
+        return lift_pi(pi);
+    }
+
+    // here I can skip every application that is closed and those that come from the partial application 
+    const Def* rewrite_imm_App(const App* app) final {
+        if (!Pi::isa_cn(app->callee_type())) return RWPhase::rewrite_imm_App(app);
+
+        log().i("rewrite app ({}:{})({}:{})", app->callee(), app->callee_type(), app->arg(), app->arg()->type());
+
+        // skip annotation
+        if (auto a = Axm::isa<anno>(app))
+            return RWPhase::rewrite_imm_App(app);
+
+        return lift_app(app);
+    }
 
 private:
     FVAnalysis fvana_ = {};

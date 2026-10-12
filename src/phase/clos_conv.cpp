@@ -100,41 +100,33 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
 }
 
 const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    // dont close axioms
-    if (is_bootstrapping()) return RWPhase::rewrite_imm_Lam(old_lam);
-
     return map(old_lam, get_closure(old_lam));
 }
 
 const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    // dont close axioms
-    if (is_bootstrapping()) return RWPhase::rewrite_mut_Lam(old_lam);
-
     return map(old_lam, get_closure(old_lam));
 }
 
 const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
-    if (!is_bootstrapping() && Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+    if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
     return RWPhase::rewrite_mut_Pi(pi);
 }
 
 const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
-    if (!is_bootstrapping() && Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+    if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
     return RWPhase::rewrite_imm_Pi(pi);
 }
 
 void ClosConv::rewrite_external(Def* old_mut) {
-    if (is_bootstrapping()) return RWPhase::rewrite_external(old_mut);
-
-    auto new_def = rewrite_root(old_mut);
+    push();
+    auto new_def = rewrite(old_mut);
+    pop();
 
     // if new_def is a tuple, then it is a closure. thus it will be externalized by its rewrite
     if (!new_def->isa_imm<Tuple>()) new_def->as_mut()->externalize();
 }
 
 const Def* ClosConv::rewrite_imm_App(const App* app) {
-    if (is_bootstrapping()) return RWPhase::rewrite_imm_App(app);
-
     auto callee = app->callee();
     auto arg    = app->arg();
 
