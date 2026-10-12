@@ -139,6 +139,8 @@ const Def* ClosConv::rewrite_procedure(Axm::IsA<anno, App> annotated) {
 
         procedures_[old_proc] = proc;
 
+        log().i("new proc {}:{}", proc, proc->type());
+
         push();
         map(old_proc->var(), proc->var(2,0));
         if (auto mlam = old_lam->isa_mut<Lam>())
