@@ -31,13 +31,4 @@ axm hoist_up: compile.Phase;
 priv axm anno.(closure): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II
-axm lam_lift_type: compile.Phase;
-/// This phase lambda lifts variables from the environment which appear in the type of the actual lambda into the domain of that lambda.
-/// Doing so enforces the following restriction in the target world.
-///
-/// > The type of a Lambda must not have any free variables.
-
-/// ### Phase III
-axm clos_conv: compile.Phase;
-/// In the source world we expect the restriction from above to be fulfilled.
-/// It enables the usage of existentials to eliminate the abstract closures.
+axm absclos_elim: compile.Phase;
