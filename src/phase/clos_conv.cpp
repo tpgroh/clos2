@@ -7,6 +7,7 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
+/*
 Lam* ClosConv::get_procedure(const DefVec& fvs, const Def* env_type, const Lam* old_lam) {
     log().i("CC {} closing", old_lam);
 
@@ -99,13 +100,7 @@ const Def* ClosConv::get_closure(const Lam* old_lam) {
     return clos;
 }
 
-const Def* ClosConv::rewrite_imm_Lam(const Lam* old_lam) {
-    return map(old_lam, get_closure(old_lam));
-}
-
-const Def* ClosConv::rewrite_mut_Lam(Lam* old_lam) {
-    return map(old_lam, get_closure(old_lam));
-}
+*/
 
 const Def* ClosConv::rewrite_mut_Pi(Pi* pi) {
     if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
@@ -117,35 +112,31 @@ const Def* ClosConv::rewrite_imm_Pi(const Pi* pi) {
     return RWPhase::rewrite_imm_Pi(pi);
 }
 
-void ClosConv::rewrite_external(Def* old_mut) {
+const Def* ClosConv::rewrite_procedure(Axm::IsA<anno, App> annotated) {
+    assert(annotated.id() == anno::closure);
+    
+    log().i("rewrite procedure {}", annotated);
+
+    auto app = annotated->arg()->as<App>();
+    auto& w = new_world();
+    auto old_proc = app->callee()->as_mut<Lam>();
+    auto old_lam = old_proc->body()->as<Lam>();
+    auto old_env = app->arg();
+
+    log().i("proc {}:{}", old_proc, old_proc->type());
+    log().i("lam {}:{}", old_lam, old_lam->type());
+    log().i("env {}:{}", old_env, old_env->type());
+
+    auto dom = w.mut_sigma(rewrite(old_proc->type()->type()), 2);
+    dom->set(0, rewrite(old_proc->dom()));
+    dom->set(1, rewrite(old_lam->dom()));
+    auto proc = w.mut_con(dom);
     push();
-    auto new_def = rewrite(old_mut);
+    map(old_proc->var(), proc->var(2,0));
+    if (auto mlam = old_lam->isa_mut<Lam>())
+        map(mlam->var(), proc->var(2,1));
+    proc->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
     pop();
 
-    // if new_def is a tuple, then it is a closure. thus it will be externalized by its rewrite
-    if (!new_def->isa_imm<Tuple>()) new_def->as_mut()->externalize();
-}
-
-const Def* ClosConv::rewrite_imm_App(const App* app) {
-    auto callee = app->callee();
-    auto arg    = app->arg();
-
-    log().i("APP {} callee {}:{} arg {}:{}", app, callee, callee->type(), arg, arg->type());
-
-    callee = rewrite(callee);
-    arg    = rewrite(arg);
-
-    log().i("APP {} callee {}:{} arg {}:{}", app, callee, callee->type(), arg, arg->type());
-
-    if (!callee->type()->isa<Pi>()) return Closure::closure_apply(callee, arg);
-    return RWPhase::rewrite_imm_App(app);
-}
-
-void ClosConv::finalize() {
-    while (!worklist_.empty()) {
-        auto old_lam = worklist_.front();
-        worklist_.pop();
-
-        rewrite_procedure_body(old_lam);
-    }
+    return Closure::pack(proc, rewrite(old_env), rewrite(old_lam->dom()));
 }

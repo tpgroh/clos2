@@ -18,14 +18,14 @@ const Def* Closure::closure_type(const Def* dom) {
     sig->var(3, 0)->set("N");
     sig->var(3, 1)->set("n");
     sig->var(3, 2)->set("p");
-    sig->set("closure");
+    // sig->set("closure");
 
     return sig;
 }
 
-const Def* Closure::pack() const {
+const Def* Closure::pack(Lam* procedure, const Def* environment, const Def* dom) {
     auto& w       = procedure->world();
-    auto clostype = closure_type(procedure->type()->dom());
+    auto clostype = closure_type(dom);
     auto clos     = w.tuple(clostype, {environment->type(), environment, procedure});
     clos->set("closure");
     return clos;

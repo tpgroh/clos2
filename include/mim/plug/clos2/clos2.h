@@ -14,11 +14,7 @@ struct Closure {
     static const Def* closure_apply(const Def* clos, const Def* arg);
 
     /// create a representation of this abstract closure
-    const Def* pack() const;
-
-    const DefVec fvs{};
-    const Def* environment = nullptr;
-    Lam* procedure         = nullptr;
+    static const Def* pack(Lam* procedure, const Def* environment, const Def* dom);
 };
 
 } // namespace mim::plug::clos2
