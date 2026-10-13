@@ -31,4 +31,5 @@ axm hoist_up: compile.Phase;
 priv axm anno.(closure): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II
+priv anx nom Env = [];
 axm absclos_elim: compile.Phase;

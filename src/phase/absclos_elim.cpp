@@ -31,8 +31,11 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
         return it->second;
     }
 
-    auto dom = w.mut_sigma(rewrite(old_proc->type()->type()), 2);
+    auto dom_type = rewrite(old_proc->type()->type());
+    log().i("dom_type {}", dom_type);
+    auto dom = w.mut_sigma(dom_type, 2);
     dom->set(0, rewrite(old_proc->dom()));
+    map(old_proc->var(), dom->var(2,0));
     dom->set(1, rewrite(old_lam->dom()));
     auto proc = w.mut_con(dom);
     proc->set(old_proc->dbg_key());
