@@ -32,4 +32,5 @@ priv axm anno.(closure): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II
 priv anx nom Env = [];
+priv axm unsafe_cast: {S: *} → [D: *] → S → D;
 axm absclos_elim: compile.Phase;

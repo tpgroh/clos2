@@ -17,36 +17,43 @@ namespace Closure {
 inline const Def* closure_type(const Def* dom) {
     auto& w = dom->world();
 
-    auto sig = w.mut_sigma(3);
-    sig->set(0, w.type());
-    auto N = sig->var(3, 0);
-    sig->set(1, N);
-    sig->set(2, w.cn({N, dom}));
-
-    // to help with debugging
-    sig->var(3, 0)->set("N");
-    sig->var(3, 1)->set("n");
-    sig->var(3, 2)->set("p");
-    //sig->set("closure");
-
-    return sig;
+    auto env = w.annex<clos2::Env>();
+    return w.sigma({w.cn({env, dom}), env});
 }
 
-inline const Def* pack(Lam* procedure, const Def* environment, const Def* environment_type, const Def* dom) {
-    auto& w       = procedure->world();
-    auto clostype = closure_type(dom);
-    auto clos     = w.tuple(/*clostype,*/ {environment_type, environment, procedure});
-    clos->set("closure");
+inline const Sigma* isa_closure_type(const Def* def) {
+    auto env = def->world().annex<Env>();
 
-    w.log().i("Pack as {}:{}", clos, clos->type());
-    w.log().i("proc {}:{}", procedure, procedure->type());
-    w.log().i("env  {}:{}", environment, environment_type);
-    return clos;
+    if (auto sigma = def->isa<Sigma>(); sigma && sigma->num_ops() == 2 && sigma->op(1) == env)
+        return sigma;
+
+    return nullptr;
+}
+
+inline const Def* pack(const Lam* procedure, const Def* environment, const Def* dom) {
+    auto& w       = procedure->world();
+    w.log().i("pack {} with {}", procedure, environment);
+
+    // check that the calling convention holds until here
+    {
+        auto procedure_pi = procedure->type()->isa<Pi>();
+        assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
+        auto [e, _] = procedure_pi->doms<2>();
+        assert(Checker::alpha<Checker::Test>(e, environment->type()) && "procedure does not accept env as its first argument");
+    }
+
+    auto [code_t, env_t] = closure_type(dom)->projs<2>();
+    w.log().i("using code_t {}", code_t);
+    w.log().i("using env_t {}", env_t);
+    return w.tuple({
+        w.call<clos2::unsafe_cast>(code_t, procedure),
+        w.call<clos2::unsafe_cast>(env_t, environment)
+    });
 }
 
 inline const Def* closure_apply(const Def* clos, const Def* arg) {
-    auto& w             = clos->world();
-    auto [_, env, proc] = clos->projs<3>();
+    auto& w          = clos->world();
+    auto [proc, env] = clos->projs<2>();
 
     w.log().i("UP {}", clos);
     w.log().i("prc {}:{}", proc, proc->type());
@@ -63,23 +70,27 @@ public:
 
 private:
     Lam* rewrite_procedure(Lam*);
-    const Def* rewrite_mut_Pi(Pi*) final;
-    const Def* rewrite_imm_Pi(const Pi*) final;
+
+    void rewrite_external (Def* mut) final {
+        auto new_mut = rewrite(mut);
+        log().i("rewrite_external {}", mut);
+        auto fvs = new_mut->free_vars();
+        log().i("new_mut has fvs {}", fvs);
+        for (auto v : fvs)
+            log().i("{} binded by {}", v, v->binder());
+        RWPhase::rewrite_external(mut);
+    }
 
     const Def* create_closure(Axm::IsA<anno, App> a) {
         log().i("create closure {}", a);
         
         auto app = a->arg()->as<App>();
-        auto old_proc = app->callee()->as_mut<Lam>();
-        auto old_env_type = old_proc->dom();
-        auto old_env = app->arg();
+        auto new_proc = rewrite_procedure(app->callee()->as_mut<Lam>());
+        auto environment = rewrite(app->arg());
+        auto dom = rewrite(a->type()->as<Pi>()->dom());
+        log().i("cc using dom {}", dom);
 
-        auto new_proc = rewrite_procedure(old_proc);
-        auto environment = rewrite(old_env);
-        auto dom = rewrite(app->type()->as<Pi>()->dom());
-        auto new_env_type = rewrite(old_env_type);
-
-        return Closure::pack(new_proc, environment, new_env_type, dom);
+        return Closure::pack(new_proc, environment, rewrite(a->type()->as<Pi>()->dom()));
     }
 
     // abstract closure elim and closure application
@@ -92,19 +103,14 @@ private:
         auto new_callee = rewrite(app->callee());
 
         // if the callee is not a Pi then it is a closure
-        if (!new_callee->type()->isa<Pi>()) {
-            log().i("detected callee {} to be a closure", new_callee->type());
-            log().i("procedure {}:{}", new_callee, new_callee->type());
-            log().i("environment {}:{}", new_arg, new_arg->type());
+        if (Closure::isa_closure_type(new_callee->type()))
             return Closure::closure_apply(new_callee, new_arg);
-        }
 
         log().i("also no closure application thus RWPhase rewrite");
         log().i("new_callee {}:{}", new_callee, new_callee->type());
         log().i("new_arg {}:{}", new_arg, new_arg->type());
 
-        return new_world().app(new_callee, new_arg)->set(app->dbg_key());
-        //return RWPhase::rewrite_imm_App(app);
+        return new_world().app(new_callee, new_arg);
     }
 
     /* currently I'm rewriting every Pi but I have to skip the Pi of a lambda */
@@ -123,6 +129,17 @@ private:
         const Pi* new_pi = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
         return rewrite_stub(d, new_world().mut_lam(new_pi));
     }
+    
+    const Def* rewrite_mut_Pi(Pi* pi) final {
+        if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+        return RWPhase::rewrite_mut_Pi(pi);
+    }
+
+    const Def* rewrite_imm_Pi(const Pi* pi) final {
+        if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+        return RWPhase::rewrite_imm_Pi(pi);
+    }
+
 
 private:
     DefMap<Lam*> procedures_{};
