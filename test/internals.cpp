@@ -13,7 +13,7 @@ using namespace mim;
 using namespace mim::plug;
 
 // a simple to test the very basics
-TEST_CASE("clos2-fvanalysis-simple") {
+TEST_CASE("clos2.fvanalysis-simple") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -49,7 +49,7 @@ TEST_CASE("clos2-fvanalysis-simple") {
 
 // simple test to check if the extractions of a var will be unpeeled into including the var if the union of free vars
 // included all extractions of it
-TEST_CASE("internals_simple_peel_off") {
+TEST_CASE("clos2.internals_simple_peel_off") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
@@ -81,15 +81,15 @@ TEST_CASE("internals_simple_peel_off") {
 }
 
 // test if dangling extractions get removed correctly
-TEST_CASE("internals_trans_peel_off") {
+TEST_CASE("clos2.internals_trans_peel_off") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
 
-    auto foo    = w.mut_lam({w.type_bool(), w.arr(2, w.arr(2, w.type_i32()))}, w.type_i32());
+    auto foo    = w.mut_lam({w.type_bool(), w.arr(2, w.sigma({w.type_i32(), w.type_i32(), w.type_nat()}))}, w.type_i32());
     auto [a, b] = foo->var(2, 1)->projs<2>();
-    auto [u, v] = a->projs<2>();
-    auto [x, y] = b->projs<2>();
+    auto [u, v, q] = a->projs<3>();
+    auto [x, y, z] = b->projs<3>();
 
     auto sum2 = w.mut_lam({w.type_i32(), w.type_i32()}, w.type_i32());
     {
@@ -103,9 +103,9 @@ TEST_CASE("internals_trans_peel_off") {
         sum3->set(false, w.app(sum2, {w.app(sum2, {x, y}), z}));
     }
 
-    auto f1 = w.app(sum3, {x, u, y}); // FV is {b,u}
-    auto f2 = w.app(sum2, {u, v});    // FV is {a}
-    auto f3 = w.app(sum2, {f1, f2});  // FV is {foo->var(2,1)} I dont want u to be included!
+    auto f1 = w.app(sum3, {x, y, w.app(sum2, {u, w.call<core::bitcast>(w.type_i32(), z)})}); // FV is {b,u}
+    auto f2 = w.app(sum3, {u, v, w.call<core::bitcast>(w.type_i32(), q)});    // FV is {a}
+    auto f3 = w.app(sum2, {f1, f2});  // FV is {foo->var(2,1)} I dont want `u` to be included!
 
     foo->set(false, f3);
 
@@ -127,18 +127,18 @@ TEST_CASE("internals_trans_peel_off") {
 
 // tests that it doesn't unpeel if it is not extracting directly from a Var with an arity higher or equal to the
 // scalarize_threshold
-TEST_CASE("internals_threshold1") {
+TEST_CASE("clos2.internals_threshold1") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
 
-    auto foo = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
-    auto v1  = foo->var(foo->num_projs(), 0)->proj(2, 0);
-    auto v2  = foo->var(foo->num_projs(), 1)->proj(2, 0);
+    auto foo = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.sigma({w.type_bool(), w.type_nat()})), w.type_bool());
+    auto v1  = foo->var(w.flags().scalarize_threshold, 0)->proj(2, 0);
+    auto v2  = foo->var(w.flags().scalarize_threshold, 1)->proj(2, 0);
     auto b   = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
     for (size_t i = 2; i < w.flags().scalarize_threshold; i++) {
         v1 = b;
-        v2 = foo->var(foo->num_projs(), i)->proj(2, 0);
+        v2 = foo->var(w.flags().scalarize_threshold, i)->proj(2, 0);
         b  = w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2});
     }
     foo->set(false, b);
@@ -147,16 +147,16 @@ TEST_CASE("internals_threshold1") {
     auto fvs = ana.free_vars(foo->body());
     CHECK(fvs.size() == w.flags().scalarize_threshold);
     for (size_t i = 0; i < w.flags().scalarize_threshold; i++)
-        CHECK(fvs.contains(foo->var(foo->num_projs(), i)->proj(2, 0)));
+        CHECK(fvs.contains(foo->var(w.flags().scalarize_threshold, i)->proj(2, 0)));
 }
 
 // tests if it unpeels if extracting from a var which has an arity higher or equal to the scalarize_threshold
-TEST_CASE("internals_threshold2") {
+TEST_CASE("clos2.internals_threshold2") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
     auto foo      = w.mut_lam(w.arr(w.flags().scalarize_threshold, w.arr(2, w.type_bool())), w.type_bool());
-    auto [v1, v2] = foo->var(foo->num_projs(), 7)->projs<2>();
+    auto [v1, v2] = foo->var(w.flags().scalarize_threshold, 7)->projs<2>();
     foo->set(false, w.call(core::bit2::xor_, core::Mode::none, Defs{v1, v2}));
 
     clos2::FVAnalysis ana;
@@ -166,7 +166,7 @@ TEST_CASE("internals_threshold2") {
     CHECK(fvs.contains(foo->var()));
 }
 
-TEST_CASE("internals_extract_from_lam") {
+TEST_CASE("clos2.internals_extract_from_lam") {
     Driver driver;
     auto& w = driver.world();
     ast::load_plugin(w, "core");
