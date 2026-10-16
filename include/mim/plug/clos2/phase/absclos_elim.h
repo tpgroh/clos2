@@ -49,17 +49,21 @@ namespace mim::plug::clos2 {
 
 namespace Closure {
 
+/// create closure type `rec alpha . [Cn [alpha, dom], Env]`
 inline const Def* closure_type(const Def* dom) {
     auto& w = dom->world();
 
-    auto clos = w.mut_sigma(dom->type(), 2);
-    auto env = w.annex<clos2::Env>();
-    return w.sigma({w.cn({env, dom}), env});
+    auto alpha = w.mut_sigma(dom->type(), 2);
+    alpha->set("clos_type");
+    alpha->set(0, w.cn({alpha, dom}));
+    alpha->set(1, w.annex<clos2::Env>());
+    return alpha;
 }
 
 inline const Sigma* isa_closure_type(const Def* def) {
     auto env = def->world().annex<Env>();
 
+    // TODO: I should add more checks
     if (auto sigma = def->isa<Sigma>(); sigma && sigma->num_ops() == 2 && sigma->op(1) == env)
         return sigma;
 
@@ -74,7 +78,8 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
     {
         auto procedure_pi = procedure->type()->isa<Pi>();
         assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
-        auto [e, _] = procedure_pi->doms<2>();
+        auto [c, _] = procedure_pi->doms<2>();
+        auto [_, e] = c->projs<2>();
         assert(Checker::alpha<Checker::Test>(e, environment->type()) && "procedure does not accept env as its first argument");
     }
 
@@ -89,14 +94,14 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
 
 inline const Def* closure_apply(const Def* clos, const Def* arg) {
     auto& w          = clos->world();
-    auto [proc, env] = clos->projs<2>();
+    auto [proc, env] = clos->projs<2>(); // this enforces the calling convention, by construction
 
     w.log().i("UP {}", clos);
     w.log().i("prc {}:{}", proc, proc->type());
     w.log().i("env {}:{}", env, env->type());
     w.log().i("arg {}:{}", arg, arg->type());
 
-    return w.app(proc, {env, arg});
+    return w.app(proc, {clos, arg});
 }
 }
 
@@ -121,7 +126,8 @@ private:
         log().i("create closure {}", a);
         
         auto app = a->arg()->as<App>();
-        auto new_proc = rewrite_procedure(app->callee()->as_mut<Lam>());
+        auto old_proc = app->callee()->as_mut<Lam>();
+        auto new_proc = rewrite_procedure(old_proc);
         auto environment = rewrite(app->arg());
         auto dom = rewrite(a->type()->as<Pi>()->dom());
         log().i("cc using dom {}", dom);
@@ -140,7 +146,7 @@ private:
 
         // if the callee is not a Pi then it is a closure
         if (Closure::isa_closure_type(new_callee->type()))
-            return Closure::closure_apply(new_callee, new_arg);
+            return Closure::closure_apply(new_callee, new_arg); // this enforces that we use the calling convention
 
         log().i("also no closure application thus RWPhase rewrite");
         log().i("new_callee {}:{}", new_callee, new_callee->type());
@@ -165,7 +171,7 @@ private:
         const Pi* new_pi = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
         return rewrite_stub(d, new_world().mut_lam(new_pi));
     }
-    
+
     const Def* rewrite_mut_Pi(Pi* pi) final {
         if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
         return RWPhase::rewrite_mut_Pi(pi);
