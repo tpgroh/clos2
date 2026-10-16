@@ -10,6 +10,41 @@
 
 #include "mim/plug/clos2/clos2.h"
 
+/// Notes on the requirements for the FCC paper's optimizations
+/// - Requirement 1:
+///   > A typed closure abstraction must hide the type of the environment.
+///   **Why?** The reason for this requirement is simply that two closures with different env types still have to be interchangeable if the
+///   closed lambda had the same types.
+/// - Requirement 2:
+///   > A typed closure abstraction must enforce the calling convention:
+///   > the code pointer is called with its packaged environment.
+///   **Why?** This gives us a proof that the transformation obayed the calling convention instead of having to verify that it will always do
+///   this right.
+/// - Requirement 3:
+///   > A typed closure abstraction should support the efficient flat closure representation and introduce no overhead.
+///   **Why?** The flat closure representation reduces the number of closure allocations.
+///   and as closures are slow we dont want to add additional overhead.
+/// - Requirement 4:
+///   > Procedures (including recursive) are directly callable through their code pointer.
+///   
+/// - Requirement 5:
+///   > Procedures must have unrestricted signatures.
+///   **Why?** This is required for well known closure optimization. It allows us calling the procedure directly without going through
+///   the code pointer.
+/// - Requirement 6:
+///   > The IL must satisfy subject reduction.
+/// - Requirement 7:
+///   > A typed closure representation must enable (mutually) recursive calls without reallocating the closure.
+///   **Why?** also to prevent overhead. this is enabled by requirement 3 (flat closure representation)
+///
+///
+/// TODO:
+/// - Im missing some of the requirements
+///     * requirement 2: this should be possible
+///     * requirement 3: here Im missing the flat closure representation
+///         this should also enable requirement 7
+///
+
 namespace mim::plug::clos2 {
 
 namespace Closure {
@@ -17,6 +52,7 @@ namespace Closure {
 inline const Def* closure_type(const Def* dom) {
     auto& w = dom->world();
 
+    auto clos = w.mut_sigma(dom->type(), 2);
     auto env = w.annex<clos2::Env>();
     return w.sigma({w.cn({env, dom}), env});
 }
