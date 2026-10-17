@@ -32,11 +32,8 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
     dom->set(0, w.sigma({w.cn(dom), env_type}));
     dom->var(2, 0)->set("clos");
     map(old_proc->var(), dom->var(2, 0)->proj(2, 1));
-    log().i("now rewriting old lam dom");
     dom->set(1, rewrite(old_lam->dom()));
     dom->var(2, 1)->set("arg");
-    log().i("done rewriting old lam dom");
-    log().i("creating a procedure with the dom type {}", dom);
     pop();
     auto proc = w.mut_con(dom);
     proc->set(old_proc->dbg_key());
@@ -44,6 +41,20 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
     procedures_[old_proc] = proc;
 
     log().i("new proc {}:{}", proc, proc->type());
+
+    { // set syms for debugging
+        auto [c, a] = proc->vars<2>();
+        auto [p, e] = c->projs<2>();
+        a->set("arg");
+        p->set(old_proc->sym());
+        e->set(old_proc->var()->sym());
+        if (old_proc->num_vars() > 1) {
+            auto num_vars = old_proc->num_vars();
+            assert(e->num_projs() == num_vars && "the size of the environment should be preserved in rewriting the procedure");
+            for (size_t i = 0; i < old_proc->num_vars(); i++)
+                e->proj(num_vars, i)->set(old_proc->var(num_vars, i)->sym());
+        }
+    }
 
     push();
     map(old_proc->var(), proc->var(2, 0)->proj(2, 1));
