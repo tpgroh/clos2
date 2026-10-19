@@ -9,9 +9,11 @@ namespace mim::plug::clos2 {
 class FVAnalysis {
 public:
     DefSet free_vars(const Def* def) {
-        if (auto mut = def->isa_mut()) return free_vars(mut);
-
-        // run pre pass
+        EXAnalysis exs{def};
+        return free_vars(def, exs);
+    }
+    
+    DefSet free_vars(Def* def) {
         EXAnalysis exs{def};
         return free_vars(def, exs);
     }
@@ -34,16 +36,8 @@ public:
         return exs.getCovering<false>(fvs);
     }
 
-    DefSet free_vars(Def* def) {
-        if (fvs_.contains(def)) return get_state(def);
-
-        EXAnalysis exs{def};
-        return free_vars(def, exs);
-
-        return get_state(def);
-    }
-
     DefSet free_vars(Def* def, EXAnalysis& exs) {
+        // we cache free vars of mutables
         if (fvs_.contains(def)) return get_state(def);
 
         auto& st = get_state(def);
@@ -63,7 +57,7 @@ public:
                 auto fvs2 = free_vars(mut, exs2);
                 exs.include(exs2);
 
-                for (auto v : exs.getCovering(fvs2))
+                for (auto v : exs.getCovering<true>(fvs2))
                     st.insert(v);
             }
         }
@@ -73,7 +67,7 @@ public:
         if (auto var = def->has_var()) exs.include(var);
 
         // minimize vars_ (there might be entries which are covered by another extraction in exs)
-        st = exs.getCovering(st);
+        st = exs.getCovering<false>(st);
 
         // FV(lam x.e) = FV(e) \ {x}
         if (auto var = def->has_var()) st.erase(var);
