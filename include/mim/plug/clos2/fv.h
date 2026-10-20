@@ -8,6 +8,7 @@ namespace mim::plug::clos2 {
 
 class FVAnalysis {
 private:
+    // I have to use NodeMap because I require pointer/reference stability
     using Cache = GIDNodeMap<const Def*, DefSet>;
 
 public:
@@ -21,98 +22,85 @@ public:
     }
 
     // with fast set we can use getCovering in fast mode instead
-    template<bool fast=false>
     DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
-        if (auto mut = def->isa_mut()) return free_vars<fast>(mut, exs, cache);
-
-        // if the free vars of this def where already computed use the cached one
-        if (fvs_.contains(def)) return fvs_.at(def);
-
-        auto fvs = local_extracts(def, cache);
-        for (auto mut : def->local_muts()) {
-            assert(mut->is_set());
-
-            EXAnalysis exs2{mut};
-            auto fvs2 = free_vars<true>(mut, exs2, cache);
-            exs.include(exs2);
-
-            for (auto v : exs.getCovering<true>(fvs2))
-                fvs.insert(v);
-        }
-
-        return exs.getCovering<fast>(fvs);
-    }
-
-    // with fast set we can use getCovering in fast mode instead
-    template<bool fast=false>
-    DefSet free_vars(Def* def, EXAnalysis& exs, Cache& cache) {
         // use cached result if it exists
         if (fvs_.contains(def)) return fvs_.at(def);
         if (cache.contains(def)) return cache.at(def);
 
-        // create cache because def is mutable (might appear down the line)
-        auto& st = get_state(def, cache);
+        // collect inside of the temporary cache
+        auto& fvs = cache[def];
 
+        // first we have to collect all local_extractions
+        // if def is immutable then we use local_extracts()
+        // if def is mutable then we take the union of the local_extracts of all immutable deps
+        if (def->isa_imm())
+            fvs = local_extracts(def);
+        else // for mutables I have to walk
+            for (auto op : def->deps())
+                if (op->isa_imm())
+                    for (auto d : local_extracts(op))
+                        fvs.insert(d);
+
+        // if def is a Var or extract over a var I have to bail without walking the deps
+        if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext)))
+            return fvs;
+
+        // now we have to add the missing free_vars of reachable mutables. for this we can use local_muts()
+        // I keep the loop over the deps because def might be a mutable itself
         for (auto op : def->deps()) {
-            // include all local_extracts reachable
-            for (auto d : exs.getCovering<true>(local_extracts(op, cache)))
-                st.insert(d);
-
-            // and add the free vars of every from op reachable mutable
             for (auto mut : op->local_muts()) {
-                assert(mut->is_set());
+                assert(mut->is_set()); // I use this phase only on already complete worlds which are frozen. thus mut is set
 
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
                 EXAnalysis exs2{mut};
-                auto fvs2 = free_vars<true>(mut, exs2, cache);
+                auto fvs2 = free_vars(mut, exs2, cache);
                 exs.include(exs2);
 
-                for (auto v : exs.getCovering<true>(fvs2))
-                    st.insert(v);
+                for (auto v : fvs2)
+                    fvs.insert(v);
             }
         }
 
-        // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
-        // this way we can just drop var without another search for extractions of it
-        if (auto var = def->has_var()) exs.include(var);
+        // remove var if def has one and limit fvs to getCovering of it
+        if (auto var = def->has_var()) {
+            // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
+            // this way we can just drop var without another search for extractions of it
+            exs.include(var);
+            fvs = exs.getCovering(fvs);
+            fvs.erase(var);
+        } else
+            fvs = exs.getCovering(fvs);
 
-        // minimize vars_ (there might be entries which are covered by another extraction in exs)
-        st = exs.getCovering<fast>(st);
-
-        // FV(lam x.e) = FV(e) \ {x}
-        if (auto var = def->has_var()) st.erase(var);
-
-        // the free var set is stored in the state
-        return st;
+        return fvs;
     }
 
 private:
-    // this cache stores computed free var sets (only after finished computation)
-    Cache fvs_;
+    Cache fvs_, ///< stores computed free var sets (only after finished computation)
+          exts_ ///< caches local_extracts
+    ;
 
     // calculates a set of Vars and Var extractions that are found by following deps
-    DefSet local_extracts(const Def* expr, Cache& cache) { return expr->is_mutable() ? DefSet{} : get_state(expr, cache); }
+    const DefSet& local_extracts(const Def* def) {
+        assert(!def->isa_mut() && "local_extracts() does not take mutables, only immutables");
 
-    // get the current state of a def or create a new one filled with the local_extracts of the def
-    DefSet& get_state(const Def* def, Cache& cache) {
-        if (cache.contains(def)) return cache.at(def);
-        if (fvs_.contains(def)) return fvs_.at(def);
+        if (exts_.contains(def)) return exts_.at(def);
 
-        // create new empty state for def
-        auto& st = cache[def]; // default initializes the state
+        auto& exts = exts_[def];
 
-        // fill the state with collected Vars/Extracts of Var that are reachable by following deps()
+        // collect Vars/Extracts of Vars that are reachable (by following immutable deps())
         if (def->isa<Var>())
-            st.insert(def);
+            exts.insert(def);
         else if (auto ext = def->isa<Extract>(); ext && EXAnalysis::getVarOfExt(ext))
-            st.insert(def);
+            exts.insert(def);
         else
-            for (auto dep : def->deps())
-                for (auto v : local_extracts(dep, cache))
-                    st.insert(v);
+            for (auto dep : def->deps()) {
+                if (dep->isa_mut()) continue; // skip mutables, for those local_extracts is not callable and is per definition {}
+                for (auto v : local_extracts(dep))
+                    exts.insert(v);
+            }
 
-        return st;
+        return exts_[def];
     }
 };
 
