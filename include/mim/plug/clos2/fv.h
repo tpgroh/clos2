@@ -11,6 +11,7 @@ private:
     using Cache = GIDNodeMap<const Def*, DefSet>;
 
 public:
+    // calculate the set of free vars/var extractions
     DefSet free_vars(const Def* def) {
         EXAnalysis exs{def};
         Cache cache{};
@@ -27,7 +28,7 @@ public:
         // if the free vars of this def where already computed use the cached one
         if (fvs_.contains(def)) return fvs_.at(def);
 
-        auto fvs = local_vars(def, cache);
+        auto fvs = local_extracts(def, cache);
         for (auto mut : def->local_muts()) {
             assert(mut->is_set());
 
@@ -53,8 +54,8 @@ public:
         auto& st = get_state(def, cache);
 
         for (auto op : def->deps()) {
-            // include all local_vars reachable
-            for (auto d : exs.getCovering<true>(local_vars(op, cache)))
+            // include all local_extracts reachable
+            for (auto d : exs.getCovering<true>(local_extracts(op, cache)))
                 st.insert(d);
 
             // and add the free vars of every from op reachable mutable
@@ -87,27 +88,28 @@ public:
     }
 
 private:
+    // this cache stores computed free var sets (only after finished computation)
     Cache fvs_;
 
-    /// Var%s reachable by following *immutable* deps().
-    DefSet local_vars(const Def* expr, Cache& cache) { return expr->is_mutable() ? DefSet{} : get_state(expr, cache); }
+    // calculates a set of Vars and Var extractions that are found by following deps
+    DefSet local_extracts(const Def* expr, Cache& cache) { return expr->is_mutable() ? DefSet{} : get_state(expr, cache); }
 
-    /// get the internal state of a Def (creates it if needed)
+    // get the current state of a def or create a new one filled with the local_extracts of the def
     DefSet& get_state(const Def* def, Cache& cache) {
         if (cache.contains(def)) return cache.at(def);
         if (fvs_.contains(def)) return fvs_.at(def);
 
-        // create new state empty state for def
+        // create new empty state for def
         auto& st = cache[def]; // default initializes the state
 
-        // init local vars
+        // fill the state with collected Vars/Extracts of Var that are reachable by following deps()
         if (def->isa<Var>())
             st.insert(def);
         else if (auto ext = def->isa<Extract>(); ext && EXAnalysis::getVarOfExt(ext))
             st.insert(def);
         else
             for (auto dep : def->deps())
-                for (auto v : local_vars(dep, cache))
+                for (auto v : local_extracts(dep, cache))
                     st.insert(v);
 
         return st;
