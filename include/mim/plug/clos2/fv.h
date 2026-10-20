@@ -18,9 +18,11 @@ public:
         fvs_[def] = fvs;
         return fvs;
     }
-    
+
+    // with fast set we can use getCovering in fast mode instead
+    template<bool fast=false>
     DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
-        if (auto mut = def->isa_mut()) return free_vars(mut, exs, cache);
+        if (auto mut = def->isa_mut()) return free_vars<fast>(mut, exs, cache);
 
         // if the free vars of this def where already computed use the cached one
         if (fvs_.contains(def)) return fvs_.at(def);
@@ -30,26 +32,29 @@ public:
             assert(mut->is_set());
 
             EXAnalysis exs2{mut};
-            auto fvs2 = free_vars(mut, exs2, cache);
+            auto fvs2 = free_vars<true>(mut, exs2, cache);
             exs.include(exs2);
 
             for (auto v : exs.getCovering<true>(fvs2))
                 fvs.insert(v);
         }
 
-        return exs.getCovering<false>(fvs);
+        return exs.getCovering<fast>(fvs);
     }
 
+    // with fast set we can use getCovering in fast mode instead
+    template<bool fast=false>
     DefSet free_vars(Def* def, EXAnalysis& exs, Cache& cache) {
-        // we cache free vars of mutables
+        // use cached result if it exists
         if (fvs_.contains(def)) return fvs_.at(def);
         if (cache.contains(def)) return cache.at(def);
 
+        // create cache because def is mutable (might appear down the line)
         auto& st = get_state(def, cache);
 
         for (auto op : def->deps()) {
             // include all local_vars reachable
-            for (auto d : exs.getCovering(local_vars(op, cache)))
+            for (auto d : exs.getCovering<true>(local_vars(op, cache)))
                 st.insert(d);
 
             // and add the free vars of every from op reachable mutable
@@ -59,7 +64,7 @@ public:
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
                 EXAnalysis exs2{mut};
-                auto fvs2 = free_vars(mut, exs2, cache);
+                auto fvs2 = free_vars<true>(mut, exs2, cache);
                 exs.include(exs2);
 
                 for (auto v : exs.getCovering<true>(fvs2))
@@ -72,7 +77,7 @@ public:
         if (auto var = def->has_var()) exs.include(var);
 
         // minimize vars_ (there might be entries which are covered by another extraction in exs)
-        st = exs.getCovering<false>(st);
+        st = exs.getCovering<fast>(st);
 
         // FV(lam x.e) = FV(e) \ {x}
         if (auto var = def->has_var()) st.erase(var);
