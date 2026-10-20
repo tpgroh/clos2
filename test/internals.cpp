@@ -186,3 +186,46 @@ TEST_CASE("clos2.internals_extract_from_lam") {
     CHECK(fvs.size() == 1);
     CHECK(fvs.contains(foo->var()));
 }
+
+// regression test: cyclic mutables must not cache half computed free var sets
+// lam outer (a, b : I32) : I32 = up a
+// where lam up (x : I32) : I32 = h (in x)
+//       lam in (y : I32) : I32 = up y   <- cycle up -> in -> up
+//       lam h  (z : I32) : I32 = z + b  <- b only reachable via a nested mutable of up
+static void check_cyclic_fvs(bool up_first) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto outer  = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
+    auto [a, b] = outer->vars<2>();
+    auto in     = w.mut_lam(w.type_i32(), w.type_i32()); // created first so it is visited before h
+    auto h      = w.mut_lam(w.type_i32(), w.type_i32());
+    auto up     = w.mut_lam(w.type_i32(), w.type_i32());
+    h->set(false, w.call(core::wrap::add, core::Mode::none, Defs{h->var(), b}));
+    up->set(false, w.app(h, w.app(in, up->var())));
+    in->set(false, w.app(up, in->var()));
+    outer->set(false, w.app(up, a));
+
+    clos2::FVAnalysis ana;
+    if (up_first) {
+        auto fvs = ana.free_vars(up);
+        CHECK(fvs.size() == 1);
+        CHECK(fvs.contains(b));
+    }
+
+    auto fvs = ana.free_vars(in);
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(b));
+    CHECK(!fvs.contains(up->var()));
+
+    fvs = ana.free_vars(up);
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(b));
+
+    fvs = ana.free_vars(outer);
+    CHECK(fvs.size() == 0);
+}
+
+TEST_CASE("clos2.internals_cyclic_fresh") { check_cyclic_fvs(false); }
+TEST_CASE("clos2.internals_cyclic_cached") { check_cyclic_fvs(true); }
