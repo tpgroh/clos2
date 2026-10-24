@@ -202,8 +202,8 @@ public:
 
         for (auto d : old) {
             auto c = getCovering<fast>(d);
-            if (c) set.insert(*c);
-            else assert(0 && "the def in the given set must be in the current state");
+            assert(c && "the def in the given set must be in the current state");
+            set.insert(c.value_or(d));
         }
 
         return set;
