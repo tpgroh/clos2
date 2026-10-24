@@ -52,7 +52,6 @@ namespace Closure {
 inline const Def* closure_type(const Def* dom) {
     auto& w = dom->world();
 
-    auto clos = w.mut_sigma(dom->type(), 2);
     auto env = w.annex<clos2::Env>();
     return w.sigma({w.cn({env, dom}), env});
 }
@@ -75,7 +74,7 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
         auto procedure_pi = procedure->type()->isa<Pi>();
         assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
         auto [e, _] = procedure_pi->doms<2>();
-        assert(Checker::alpha<Checker::Test>(e, environment->type()) && "procedure does not accept env as its first argument");
+        assert(Check::alpha<Check::T>(e, environment->type()) && "procedure does not accept env as its first argument");
     }
 
     auto [code_t, env_t] = closure_type(dom)->projs<2>();
