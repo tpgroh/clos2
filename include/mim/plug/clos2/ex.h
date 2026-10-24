@@ -230,6 +230,7 @@ public:
 
     /// get the extraction of tuple for given Bitset and idx
     std::optional<const Def*> getExt(const Def* tuple, const fe::Bitset& idx_map, std::optional<nat_t> idx) const {
+        // note: when use as intendet then the returned Extract is hash consed, because it already exists in the tuple->world()
         if (idx && idx_map[*idx]) return tuple->world().extract(tuple, *idx);
         return {};
     }

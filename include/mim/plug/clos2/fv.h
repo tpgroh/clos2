@@ -15,13 +15,19 @@ public:
     // calculate the set of free vars/var extractions
     DefSet free_vars(const Def* def) {
         EXAnalysis exs{def};
+
+        // this temporary cache is used to break cycles.
+        // it stores partial sets of local_extracts which might not be complete. (because of cycles)
+        // note that the result of free_vars is a complete set, to use a single cache I must use fixedpoint solving
         Cache cache{};
+
+        // calculate solution and store it in the permanant cache
         auto fvs = free_vars(def, exs, cache);
         fvs_[def] = fvs;
+
         return fvs;
     }
 
-    // with fast set we can use getCovering in fast mode instead
     DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
         // use cached result if it exists
         if (fvs_.contains(def)) return fvs_.at(def);
@@ -42,8 +48,11 @@ public:
                         fvs.insert(d);
 
         // if def is a Var or extract over a var I have to bail without walking the deps
-        if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext)))
+        if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext))) {
+            // fvs can only contain def or an extract of it
+            assert(fvs.size() == 1);
             return fvs;
+        }
 
         // now we have to add the missing free_vars of reachable mutables. for this we can use local_muts()
         // I keep the loop over the deps because def might be a mutable itself
