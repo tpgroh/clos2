@@ -163,7 +163,8 @@ public:
 
     /// get covering of extraction if in state
     /// using the template var `fast` you can specify whether we search for the top most or if we stop as soon as we
-    /// found any couvering extraction. even a dangling one
+    /// found any covering extraction. even a dangling one (meaning that the covering extraction
+    /// is covered by another extraction itself)
     template<bool fast = false>
     std::optional<const Def*> getCovering(const Extract* ext, const Map& map, std::optional<const Def*> prev) const {
         auto idx = getExtIdx(ext);
@@ -201,8 +202,8 @@ public:
 
         for (auto d : old) {
             auto c = getCovering<fast>(d);
-            assert(c);
-            set.insert(*c);
+            if (c) set.insert(*c);
+            else assert(0 && "the def in the given set must be in the current state");
         }
 
         return set;

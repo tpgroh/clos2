@@ -17,7 +17,7 @@ public:
         EXAnalysis exs{def};
 
         // this temporary cache is used to break cycles.
-        // it stores partial sets of local_extracts which might not be complete. (because of cycles)
+        // it stores partial sets of free vars which might not be complete. (because of cycles)
         // note that the result of free_vars is a complete set, to use a single cache I must use fixedpoint solving
         Cache cache{};
 
@@ -28,6 +28,10 @@ public:
         return fvs;
     }
 
+    // calculate free_vars of def
+    // note that this function must not write to fvs_, as fvs of a def here might be only a partial free var set
+    // instead use the temporary cache, which we throw away after afterwards. this way I dont require fixed point
+    // solving
     DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
         // use cached result if it exists
         if (fvs_.contains(def)) return fvs_.at(def);
@@ -49,7 +53,7 @@ public:
 
         // if def is a Var or extract over a var I have to bail without walking the deps
         if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext))) {
-            // fvs can only contain def or an extract of it
+            // here fvs is { def } which is the correct free vars set of def, thus no getCovering required
             assert(fvs.size() == 1);
             return fvs;
         }
@@ -58,7 +62,7 @@ public:
         // I keep the loop over the deps because def might be a mutable itself
         for (auto op : def->deps()) {
             for (auto mut : op->local_muts()) {
-                assert(mut->is_set()); // I use this phase only on already complete worlds which are frozen. thus mut is set
+                assert(mut->is_set()); // I use this phase only on already complete worlds which we dont modify. thus mut is set
 
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
@@ -109,7 +113,7 @@ private:
                     exts.insert(v);
             }
 
-        return exts_[def];
+        return exts;
     }
 };
 
