@@ -8,39 +8,52 @@ using namespace mim::plug;
 using namespace mim::plug::clos2;
 
 Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
-    log().i("rewrite procedure {}", old_proc);
+    log().d("rewrite procedure {}", old_proc);
 
     auto& w = new_world();
     auto old_lam = old_proc->body()->as<Lam>();
 
-    log().i("proc {}:{}", old_proc, old_proc->type());
-    log().i("lam {}:{}", old_lam, old_lam->type());
+    log().d("proc {}:{}", old_proc, old_proc->type());
+    log().d("lam {}:{}", old_lam, old_lam->type());
 
     if (auto it = procedures_.find(old_proc); it != procedures_.end()) {
-        log().i("reuse procedure {}", old_proc, it->second);
+        log().d("reuse procedure {}", old_proc, it->second);
         return it->second;
     }
 
-    push(); // this prevents a bug where we leak stuff from the type rewrite into the body
-    auto dom_type = rewrite(old_proc->type()->type());
-    log().i("dom_type {}", dom_type);
+    push();
+    bind_old(old_proc->has_var());
+    bind_old(old_lam->has_var());
+
+    auto dom_type = rewrite(old_proc->type()->type()); // FIXME: there must be a nicer way for this
+    log().d("dom_type {}", dom_type);
     auto dom = w.mut_sigma(dom_type, 2);
-    // TODO: I actually dont want to name this sigma but there it currently is required to dump something that is recursive
+    bind_new(dom->var()->isa<Var>());
+    // TODO: I actually dont want to name this sigma but it is currently required to dump something that is recursive
     dom->set("procedure_dom");
     auto env_type = rewrite(old_proc->dom());
-    log().i("env type {}", env_type);
+    log().d("env type {}", env_type);
     dom->set(0, w.sigma({w.cn(dom), env_type}));
     dom->var(2, 0)->set("clos");
-    map(old_proc->var(), dom->var(2, 0)->proj(2, 1));
+    // this map is the reason for the pop();push(); below
+    if (auto v = old_proc->has_var()) map(v, dom->var(2, 0)->proj(2, 1));
     dom->set(1, rewrite(old_lam->dom()));
     dom->var(2, 1)->set("arg");
     pop();
+
+    // we have to reset the scope because of the map above
+    push();
+    bind_old(old_proc->has_var());
+    bind_old(old_lam->has_var());
+
     auto proc = w.mut_con(dom);
     proc->set(old_proc->dbg_key());
+    bind_new(proc->var()->isa<Var>());
 
+    // TODO: I should be able to use map for this. procedure is closed. thus it should fall through to the root scope
     procedures_[old_proc] = proc;
 
-    log().i("new proc {}:{}", proc, proc->type());
+    log().d("new proc {}:{}", proc, proc->type());
 
     { // set syms for debugging
         auto [c, a] = proc->vars<2>();
@@ -56,7 +69,6 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
         }
     }
 
-    push();
     map(old_proc->var(), proc->var(2, 0)->proj(2, 1));
     if (auto mlam = old_lam->isa_mut<Lam>())
         map(mlam->var(), proc->var(2,1));

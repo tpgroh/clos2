@@ -72,7 +72,7 @@ inline const Sigma* isa_closure_type(const Def* def) {
 
 inline const Def* pack(const Lam* procedure, const Def* environment, const Def* dom) {
     auto& w       = procedure->world();
-    w.log().i("pack {} with {}", procedure, environment);
+    w.log().d("pack {} with {}", procedure, environment);
 
     // check that the calling convention holds until here
     {
@@ -84,8 +84,8 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
     }
 
     auto [code_t, env_t] = closure_type(dom)->projs<2>();
-    w.log().i("using code_t {}", code_t);
-    w.log().i("using env_t {}", env_t);
+    w.log().d("using code_t {}", code_t);
+    w.log().d("using env_t {}", env_t);
     return w.tuple({
         w.call<clos2::unsafe_cast>(code_t, procedure),
         w.call<clos2::unsafe_cast>(env_t, environment)
@@ -96,10 +96,10 @@ inline const Def* closure_apply(const Def* clos, const Def* arg) {
     auto& w          = clos->world();
     auto [proc, env] = clos->projs<2>(); // this enforces the calling convention, by construction
 
-    w.log().i("UP {}", clos);
-    w.log().i("prc {}:{}", proc, proc->type());
-    w.log().i("env {}:{}", env, env->type());
-    w.log().i("arg {}:{}", arg, arg->type());
+    w.log().d("UP {}", clos);
+    w.log().d("prc {}:{}", proc, proc->type());
+    w.log().d("env {}:{}", env, env->type());
+    w.log().d("arg {}:{}", arg, arg->type());
 
     return w.app(proc, {clos, arg});
 }
@@ -114,32 +114,32 @@ private:
 
     void rewrite_external (Def* mut) final {
         auto new_mut = rewrite(mut);
-        log().i("rewrite_external {}", mut);
+        log().d("rewrite_external {}", mut);
         auto fvs = new_mut->free_vars();
-        log().i("new_mut has fvs {}", fvs);
+        log().d("new_mut has fvs {}", fvs);
         for (auto v : fvs)
-            log().i("{} binded by {}", v, v->binder());
+            log().d("{} binded by {}", v, v->binder());
         RWPhase::rewrite_external(mut);
     }
 
     const Def* create_closure(Axm::IsA<anno, App> a) {
-        log().i("create closure {}", a);
+        log().d("create closure {}", a);
         
         auto app = a->arg()->as<App>();
         auto old_proc = app->callee()->as_mut<Lam>();
         auto new_proc = rewrite_procedure(old_proc);
         auto environment = rewrite(app->arg());
         auto dom = rewrite(a->type()->as<Pi>()->dom());
-        log().i("cc using dom {}", dom);
+        log().d("cc using dom {}", dom);
 
         return Closure::pack(new_proc, environment, rewrite(a->type()->as<Pi>()->dom()));
     }
 
     // abstract closure elim and closure application
     const Def* rewrite_imm_App(const App* app) {
-        log().i("rewrite_imm_App {}", app);
+        log().d("rewrite_imm_App {}", app);
         if (auto a = Axm::isa<anno>(app)) return create_closure(a);
-        log().i("but not create_closure");
+        log().d("but not create_closure");
 
         auto new_arg = rewrite(app->arg());
         auto new_callee = rewrite(app->callee());
@@ -148,16 +148,16 @@ private:
         if (Closure::isa_closure_type(new_callee->type()))
             return Closure::closure_apply(new_callee, new_arg); // this enforces that we use the calling convention
 
-        log().i("also no closure application thus RWPhase rewrite");
-        log().i("new_callee {}:{}", new_callee, new_callee->type());
-        log().i("new_arg {}:{}", new_arg, new_arg->type());
+        log().d("also no closure application thus RWPhase rewrite");
+        log().d("new_callee {}:{}", new_callee, new_callee->type());
+        log().d("new_arg {}:{}", new_arg, new_arg->type());
 
         return new_world().app(new_callee, new_arg);
     }
 
     /* currently I'm rewriting every Pi but I have to skip the Pi of a lambda */
     const Def* rewrite_imm_Lam(const Lam* d) final {
-        log().i("rewrite_imm_Lam {}", d);
+        log().d("rewrite_imm_Lam {}", d);
         auto old_pi = d->type();
         auto new_type   = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
         auto new_filter = rewrite(d->filter());
@@ -165,7 +165,7 @@ private:
         return new_world().lam(new_type, new_filter, new_body);
     }
     const Def* rewrite_mut_Lam(Lam* d) final {
-        log().i("rewrite_mut_Lam {}", d);
+        log().d("rewrite_mut_Lam {}", d);
         if (!Pi::isa_cn(d->type())) return map(d, rewrite_procedure(d));
         auto old_pi = d->type();
         const Pi* new_pi = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
