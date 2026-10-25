@@ -78,7 +78,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // now we can create the inner_lam
     auto inner_pi  = outer_pi->reduce(outer_lam->var())->as<Pi>();
     auto inner_lam = w.mut_lam(inner_pi);
-    
+
     // set dbg keys
     inner_lam->set(lam->dbg_key());
     outer_lam->set(lam->dbg_key());
@@ -117,7 +117,7 @@ void HoistUp::finalize() {
     while (!worklist_.empty()) {
         auto stub = worklist_.front();
         worklist_.pop();
-        
+
         const auto& lam = stub.lam;
         const auto& fvs = stub.fvs;
 
@@ -129,6 +129,7 @@ void HoistUp::finalize() {
         // create a scope that binds anything that contains the passed environment, the var of the inner lambda or the free vars
         // thus pop will drop anything that contains any of those making sure that they will not be leaked to the next finalize loop.
         push(lam->free_vars());
+        bind_old(lam->has_var());
         bind_new(outer_lam->var()->isa<Var>());
         bind_new(inner_lam->var()->isa<Var>());
 
@@ -139,17 +140,18 @@ void HoistUp::finalize() {
             env->set(fvs[0]->sym());
             map(fvs[0], env);
             log().d("mapping {} to {}", fvs[0], env);
-        } else
+        } else {
+            assert(env->num_projs() == fvs.size() && "env and fvs should agree on their arity");
             for (size_t i = 0; i < fvs.size(); i++) {
                 auto f = fvs[i];
-                auto e = w.extract(env, i);
+                auto e = env->proj(fvs.size(), i);
                 e->set(f->sym());
                 map(f, e);
                 log().d("mapping {} to {}", f, e);
             }
+        }
 
-        if (lam->is_mutable()) {
-            auto v = lam->as_mut<Lam>()->var();
+        if (auto v = lam->has_var()) {
             auto n = inner_lam->var();
             map(v, n);
             log().d("mapping mut var {} to {}", v, n);

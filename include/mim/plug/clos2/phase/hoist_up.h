@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdio>
-
 #include <queue>
 
 #include "mim/def.h"
@@ -61,15 +59,6 @@ private:
         if (lam->is_external()) return RWPhase::rewrite_imm_Lam(lam);
         // see comment on hoistUp inside rewrite_mut_Lam
         return hoistUp(lam);
-    }
-
-    // FIXME: for some reason I must rewrite first callee then arg. I should investigate that.
-    // in the base function it rewrites them the other way around...
-    // note: maybe this is gone now, I'll check
-    const Def* rewrite_imm_App(const App* app) final {
-        rewrite(app->callee());
-        rewrite(app->arg());
-        return RWPhase::rewrite_imm_App(app);
     }
 
 private:
