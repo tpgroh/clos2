@@ -34,24 +34,6 @@ private:
         return w.call(a, def);
     }
 
-    // TODO: drop this
-    const Def* rewrite(const Def* def) final {
-        log().d("rewrite {}", def);
-
-        auto new_def = RWPhase::rewrite(def);
-
-        log().d("rewrite {} ~> {}", def, new_def);
-        return new_def;
-    }
-
-    // TODO: drop this
-    const Def* rewrite_imm_Var(const Var* var) final {
-        log().d("rewrite {} has binder {}", var, var->binder());
-        // auto new_binder = rewrite(var->binder());
-        // log().d("new binder {}", new_binder);
-        return RWPhase::rewrite_imm_Var(var);
-    }
-
     const Def* rewrite_mut_Lam(Lam* lam) final {
         if (lam->is_external()) {
             // we dont want anything that depends on lam->var() to be inside the root scope
@@ -91,14 +73,13 @@ private:
     }
 
 private:
-    // TODO: should I use fe::Queuelike instead?
     struct Stub {
         const Lam* lam;
         const DefVec fvs;
     };
     std::queue<Stub> worklist_ = {};
-    DefMap<Lam*> outerlams_          = {};
-    FVAnalysis fvana_                = {};
+    DefMap<Lam*> outerlams_    = {};
+    FVAnalysis fvana_          = {};
 };
 
 } // namespace mim::plug::clos2

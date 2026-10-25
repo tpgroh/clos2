@@ -17,12 +17,12 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types)
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
-    log().i("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
+    log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
 
     // we want to reuse the procedure (outerlam) if it was already created.
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
-        log().i("reuse {} ~> {}", lam, it->second);
+        log().d("reuse {} ~> {}", lam, it->second);
         return annotate(w.app(it->second, environment), anno::closure);
     }
 
@@ -31,9 +31,10 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     // first set domain
     // if sig is closed or the environment has only one element we can skip the rewrite in else and just use the type of that
-    if (auto sig = w.tuple(environment)->type(); environment.size() == 1 || sig->is_closed())
+    if (auto sig = w.tuple(environment)->type(); environment.size() == 1 || sig->is_closed()) {
+        if (environment.size() == 1) assert(sig->is_closed()); // all free vars are in the environment, thus size 1 implies closed
         outer_pi->set_dom(sig); // sig is environment->type() or a closed sigma type
-    else {
+    } else {
         // we have to create a type for environment where the dependency of entries on each other is correctly set.
         // this is also why we sorted the fvs at the start
         auto outer_sig = w.mut_sigma(w.type_pending(), fvs.size());
@@ -101,7 +102,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     worklist_.emplace(lam, fvs);
     outerlams_[lam] = outer_lam;
 
-    log().i("hoistup {} ~> {}:{} with free vars {}", lam, outer_lam, outer_lam->type(), outer_lam->free_vars());
+    log().d("hoistup {} ~> {}:{} with free vars {}", lam, outer_lam, outer_lam->type(), outer_lam->free_vars());
 
     // this checks that the type is now closed
     if (!outer_lam->type()->is_closed())
@@ -123,10 +124,13 @@ void HoistUp::finalize() {
         const auto outer_lam = outerlams_.at(lam);
         const auto inner_lam = outer_lam->body()->as_mut<Lam>();
 
-        log().i("finalize {}", lam);
+        log().d("finalize {}", lam);
+
+        // create a scope that binds anything that contains the passed environment, the var of the inner lambda or the free vars
+        // thus pop will drop anything that contains any of those making sure that they will not be leaked to the next finalize loop.
         push(lam->free_vars());
-        bind_new(outer_lam->has_var());
-        bind_new(inner_lam->has_var());
+        bind_new(outer_lam->var()->isa<Var>());
+        bind_new(inner_lam->var()->isa<Var>());
 
         auto env = outer_lam->var();
         env->set("env");
@@ -134,40 +138,31 @@ void HoistUp::finalize() {
         if (fvs.size() == 1) {
             env->set(fvs[0]->sym());
             map(fvs[0], env);
-            log().i("mapping {} to {}", fvs[0], env);
+            log().d("mapping {} to {}", fvs[0], env);
         } else
             for (size_t i = 0; i < fvs.size(); i++) {
                 auto f = fvs[i];
                 auto e = w.extract(env, i);
                 e->set(f->sym());
                 map(f, e);
-                log().i("mapping {} to {}", f, e);
+                log().d("mapping {} to {}", f, e);
             }
 
         if (lam->is_mutable()) {
             auto v = lam->as_mut<Lam>()->var();
             auto n = inner_lam->var();
             map(v, n);
-            log().i("mapping mut var {} to {}", v, n);
+            log().d("mapping mut var {} to {}", v, n);
         }
 
-        // fix recursive and mutual recursive calls to prevent including their environments as free variables
-        // for (auto m : lam->body()->local_muts())
-        //     if (auto l = m->isa<Lam>(); l && outerlams_.contains(l)) {
-        //         log().i("remapping {} from {} to nullptr", l, RWPhase::lookup(l));
-        //         map(l, nullptr); // if l was already rewritten we let hoist_up take care of rewriting
-        //     }
-
         auto body = rewrite(lam->body());
-        log().i("rewrote body of {}", lam);
+        log().d("rewrote body of {}", lam);
         inner_lam->set(rewrite(lam->filter()), body);
 
         pop();
 
         // this checks that the body doesnt contain free vars
-        if (!outer_lam->is_closed()) {
-            outer_lam->dot("outer_lam.dot");
+        if (!outer_lam->is_closed())
             outer_lam->blame("outer_lam is not closed, has free vars {}", outer_lam->free_vars()).bail();
-        }
     }
 }
