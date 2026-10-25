@@ -19,8 +19,20 @@ public:
         : RWPhase(world, annex) {}
 
 private:
+    // hoist up a lam and adds the lam to the worklist_ for finalize to rewrite the body
     const Def* hoistUp(const Lam* lam);
-    const Def* annotate(const Def* def, anno a);
+
+    // rewrite the body of hoisted up lambdas (from the worklist_)
+    // this is being done to ensure that the rewrite of the body
+    // is happening inside a scope where everything that depends on
+    // the free_vars is already droped
+    void finalize() final;
+
+    // annotate a 'abstract' closure for later phases
+    const Def* annotate(const Def* def, anno a) {
+        auto& w = new_world();
+        return w.call(a, def);
+    }
 
     // TODO: drop this
     const Def* rewrite(const Def* def) final {
@@ -35,51 +47,39 @@ private:
     // TODO: drop this
     const Def* rewrite_imm_Var(const Var* var) final {
         log().d("rewrite {} has binder {}", var, var->binder());
-        auto new_binder = rewrite(var->binder());
-        log().d("new binder {}", new_binder);
-        // if (auto a = Axm::isa<anno>(new_binder)) {
-        //     log().d("detected var binder to be a annotation");
-        //     auto actual_binder = a->arg();
-        //     log().d("actual binder {}", actual_binder);
-        //     return new_world().var(actual_binder->as_mut());
-        // }
+        // auto new_binder = rewrite(var->binder());
+        // log().d("new binder {}", new_binder);
         return RWPhase::rewrite_imm_Var(var);
     }
 
     const Def* rewrite_mut_Lam(Lam* lam) final {
         if (lam->is_external()) {
-            // TODO : claude please check this comment if it is understandable to you
             // we dont want anything that depends on lam->var() to be inside the root scope
             // if we want to hoist up something inside of lam which is using `Idx n` where `n`
             // is the Var of `lam` then I want to rewrite `n` there to something else.
-            // thus I must drop everything that depends on `n` before to force a correct rewrite
+            // thus I must drop everything that depends on `n` before rewriting the body of that lam
+            // (the one we want to hoistup inside of the body of `lam`)
+            // which is done after returning from this function thanks to the finalize machinery.
             push();
             bind_old(lam->has_var());
             auto new_mut = RWPhase::rewrite_mut_Lam(lam);
             pop();
-
-            // NOTE: claude claims that the rewrite_stub of lam survives the pop(), I should check that
             return new_mut;
         }
 
-        // TODO : claude check this comment
         // rewrite the type of lam and its free vars.
         // note that the body will be rewritten in finalize to work inside a scope where everything that depends on the free vars is already gone
-        // the map then creates a mapping from lam to the application of hoisted_lam with environment inside of the scope where the free vars are bound
+        // the map then creates a mapping from lam to the application of hoisted_lam with environment inside of the scope where the free vars of lam
+        // (those that are also rewritten into environment) are owned
         // this way the mapping will be droped as soon as we leave the scope of those free_vars
         return map(lam, hoistUp(lam));
     }
 
     const Def* rewrite_imm_Lam(const Lam* lam) final {
         if (lam->is_external()) return RWPhase::rewrite_imm_Lam(lam);
+        // see comment on hoistUp inside rewrite_mut_Lam
         return hoistUp(lam);
     }
-
-    // rewrite the body of hoisted up lambdas (from the worklist_)
-    // this is being done to ensure that the rewrite of the body
-    // is happening inside a scope where everything that depends on
-    // the free_vars is already droped
-    void finalize() final;
 
     // FIXME: for some reason I must rewrite first callee then arg. I should investigate that.
     // in the base function it rewrites them the other way around...
