@@ -34,18 +34,21 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     std::ranges::sort(fvs, GIDLt<const Def*>());
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
+    log().i("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
+
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
         log().i("reuse {} ~> {}", lam, it->second);
         return annotate(w.app(it->second, environment), anno::closure);
     }
 
     // create pi for outer lambda
-    // TODO: use actual type, (umax of fvs + ? ) ; it should be the same as the kind of lam???
+    // TODO: use actual type, (lmax of fvs + ? ) ; it should be the same as the kind of lam???
     auto outer_pi = w.mut_pi(w.type(), false);
     if (auto sig = w.tuple(environment)->type(); sig->is_closed())
         outer_pi->set_dom(sig);
     else {
-        auto outer_sig = w.mut_sigma(rewrite(old_world().umax<UMax::Term>(fvs)), fvs.size());
+        // TODO: I now use type_pending instead of LMax. is this correct or should I manually calculate the level?
+        auto outer_sig = w.mut_sigma(w.type_pending(), fvs.size());
         auto subst = Rewriter(w);
         for (size_t i = 0; i < fvs.size(); i++) {
             outer_sig->set(i, subst.rewrite(environment[i]->type()));
@@ -159,29 +162,9 @@ void HoistUp::finalize() {
         pop();
 
         // this checks that the body doesnt contain free vars
-        if (!outer_lam->is_closed())
+        if (!outer_lam->is_closed()) {
+            outer_lam->dot("outer_lam.dot");
             outer_lam->blame("outer_lam is not closed, has free vars {}", outer_lam->free_vars()).bail();
+        }
     }
-}
-
-const Def* HoistUp::rewrite_mut_Lam(Lam* lam) {
-    if (lam->is_external()) {
-        push(); // TODO: why did I put those here
-        auto new_mut = RWPhase::rewrite_mut_Lam(lam);
-        pop();
-        return map(lam, new_mut);
-    }
-
-    return map(lam, hoistUp(lam));
-}
-
-const Def* HoistUp::rewrite_imm_Lam(const Lam* lam) {
-    if (lam->is_external()) {
-        push(); // TODO: why did I put those here
-        auto new_imm = RWPhase::rewrite_imm_Lam(lam);
-        pop();
-        return new_imm;
-    }
-
-    return hoistUp(lam);
 }
