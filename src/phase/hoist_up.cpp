@@ -30,8 +30,9 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     auto outer_pi = w.mut_pi(w.type_pending(), false);
 
     // first set domain
-    if (auto sig = w.tuple(environment)->type(); sig->is_closed()) // if sig is closed we can skip the rewrite in else
-        outer_pi->set_dom(sig);
+    // if sig is closed or the environment has only one element we can skip the rewrite in else and just use the type of that
+    if (auto sig = w.tuple(environment)->type(); environment.size() == 1 || sig->is_closed())
+        outer_pi->set_dom(sig); // sig is environment->type() or a closed sigma type
     else {
         // we have to create a type for environment where the dependency of entries on each other is correctly set.
         // this is also why we sorted the fvs at the start
@@ -56,16 +57,15 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     { // scope this to throw away the Rewriter directly afterwards
         auto subst = Rewriter(w);
         auto n = outer_pi->var();
-        auto env_size = n->num_projs();
-        log().d("env_size {} == environment.size() {}", env_size, environment.size());
-        // TODO: I thought this must be the case
-        // assert(env_size == environment.size() && "the environment and the outer_pi->var() should have the same arity");
 
         if (environment.size() == 1)
             subst.map(environment[0], n);
-        else
+        else {
+            assert(n->num_projs() == environment.size() && "the environment and the outer_pi->var() should have the same arity");
+
             for (size_t i = 0; i < environment.size(); i++)
-                subst.map(environment[i], n->proj(env_size, i));
+                subst.map(environment[i], n->proj(n->num_projs(), i));
+        }
 
         codom = subst.rewrite(wrong_inner_pi)->as<Pi>();
     }
@@ -88,11 +88,10 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
         if (mut->num_doms() == 1)
             inner_lam->var()->set(mut->var()->dbg_key());
         else {
-            auto num_doms = mut->num_doms();
-            assert(num_doms == inner_lam->num_doms() && "inner_lam and lam should have the same num_doms()");
+            assert(mut->num_doms() == inner_lam->num_doms() && "inner_lam and lam should have the same num_doms()");
 
-            for (size_t i = 0; i < num_doms; i++)
-                inner_lam->var(num_doms, i)->set(mut->var(num_doms, i)->dbg_key());
+            for (size_t i = 0; i < inner_lam->num_doms(); i++)
+                inner_lam->var(inner_lam->num_doms(), i)->set(mut->var(mut->num_doms(), i)->dbg_key());
         }
     }
 
@@ -118,14 +117,16 @@ void HoistUp::finalize() {
         auto stub = worklist_.front();
         worklist_.pop();
         
-        auto& lam = stub.lam;
-        auto& fvs = stub.fvs;
+        const auto& lam = stub.lam;
+        const auto& fvs = stub.fvs;
 
-        auto outer_lam = outerlams_.at(lam);
-        auto inner_lam = outer_lam->body()->as_mut<Lam>();
+        const auto outer_lam = outerlams_.at(lam);
+        const auto inner_lam = outer_lam->body()->as_mut<Lam>();
 
         log().i("finalize {}", lam);
-        push();
+        push(lam->free_vars());
+        bind_new(outer_lam->has_var());
+        bind_new(inner_lam->has_var());
 
         auto env = outer_lam->var();
         env->set("env");
@@ -150,12 +151,12 @@ void HoistUp::finalize() {
             log().i("mapping mut var {} to {}", v, n);
         }
 
-        // fix recursive and mutable recursive calls to prevent including their environments as free variables
-        for (auto m : lam->body()->local_muts())
-            if (auto l = m->isa<Lam>(); l && outerlams_.contains(l)) {
-                log().i("remapping {} from {} to nullptr", l, RWPhase::lookup(l));
-                map(l, nullptr); // if l was already rewritten we let hoist_up take care of rewriting
-            }
+        // fix recursive and mutual recursive calls to prevent including their environments as free variables
+        // for (auto m : lam->body()->local_muts())
+        //     if (auto l = m->isa<Lam>(); l && outerlams_.contains(l)) {
+        //         log().i("remapping {} from {} to nullptr", l, RWPhase::lookup(l));
+        //         map(l, nullptr); // if l was already rewritten we let hoist_up take care of rewriting
+        //     }
 
         auto body = rewrite(lam->body());
         log().i("rewrote body of {}", lam);
