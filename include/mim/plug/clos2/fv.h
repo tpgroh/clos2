@@ -7,109 +7,114 @@
 namespace mim::plug::clos2 {
 
 class FVAnalysis {
-public:
-    DefSet free_vars(const Def* def) {
-        if (auto mut = def->isa_mut()) return free_vars(mut);
+private:
+    // I have to use NodeMap because I require pointer/reference stability
+    using Cache = GIDNodeMap<const Def*, DefSet>;
 
-        // run pre pass
+public:
+    // calculate the set of free vars/var extractions
+    DefSet free_vars(const Def* def) {
         EXAnalysis exs{def};
-        return free_vars(def, exs);
+
+        // this temporary cache is used to break cycles.
+        // it stores partial sets of free vars which might not be complete. (because of cycles)
+        // note that the result of free_vars is a complete set, to use a single cache I must use fixedpoint solving
+        Cache cache{};
+
+        // calculate solution and store it in the permanant cache
+        auto fvs = free_vars(def, exs, cache);
+        fvs_[def] = fvs;
+
+        return fvs;
     }
 
-    DefSet free_vars(const Def* def, EXAnalysis& exs) {
-        if (auto mut = def->isa_mut()) return free_vars(mut, exs);
+    // calculate free_vars of def
+    // note that this function must not write to fvs_, as fvs of a def here might be only a partial free var set
+    // instead use the temporary cache, which we throw away after afterwards. this way I dont require fixed point
+    // solving
+    DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
+        // use cached result if it exists
+        if (fvs_.contains(def)) return fvs_.at(def);
+        if (cache.contains(def)) return cache.at(def);
 
-        auto fvs = local_vars(def);
-        for (auto mut : def->local_muts()) {
-            assert(mut->is_set());
+        // collect inside of the temporary cache
+        auto& fvs = cache[def];
 
-            EXAnalysis exs2{mut};
-            auto fvs2 = free_vars(mut, exs2);
-            exs.include(exs2);
+        // first we have to collect all local_extractions
+        // if def is immutable then we use local_extracts()
+        // if def is mutable then we take the union of the local_extracts of all immutable deps
+        if (def->isa_imm())
+            fvs = local_extracts(def);
+        else // for mutables I have to walk
+            for (auto op : def->deps())
+                if (op->isa_imm())
+                    for (auto d : local_extracts(op))
+                        fvs.insert(d);
 
-            for (auto v : exs.getCovering<true>(fvs2))
-                fvs.insert(v);
+        // if def is a Var or extract over a var I have to bail without walking the deps
+        if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext))) {
+            // here fvs is { def } which is the correct free vars set of def, thus no getCovering required
+            assert(fvs.size() == 1);
+            return fvs;
         }
 
-        return exs.getCovering<false>(fvs);
-    }
-
-    DefSet free_vars(Def* def) {
-        if (fvs_.contains(def)) return get_state(def);
-
-        EXAnalysis exs{def};
-        return free_vars(def, exs);
-
-        return get_state(def);
-    }
-
-    DefSet free_vars(Def* def, EXAnalysis& exs) {
-        if (fvs_.contains(def)) return get_state(def);
-
-        auto& st = get_state(def);
-
+        // now we have to add the missing free_vars of reachable mutables. for this we can use local_muts()
+        // I keep the loop over the deps because def might be a mutable itself
         for (auto op : def->deps()) {
-            // include all local_vars reachable
-            for (auto d : exs.getCovering(local_vars(op)))
-                st.insert(d);
-
-            // and add the free vars of every from op reachable mutable
             for (auto mut : op->local_muts()) {
-                assert(mut->is_set());
+                assert(mut->is_set()); // I use this phase only on already complete worlds which we dont modify. thus mut is set
 
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
                 EXAnalysis exs2{mut};
-                auto fvs2 = free_vars(mut, exs2);
+                auto fvs2 = free_vars(mut, exs2, cache);
                 exs.include(exs2);
 
-                for (auto v : exs.getCovering(fvs2))
-                    st.insert(v);
+                for (auto v : fvs2)
+                    fvs.insert(v);
             }
         }
 
-        // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
-        // this way we can just drop var without another search for extractions of it
-        if (auto var = def->has_var()) exs.include(var);
+        // remove var if def has one and limit fvs to getCovering of it
+        if (auto var = def->has_var()) {
+            // by including var to exs the minimization in the next step will reduce all extractions of var to just var.
+            // this way we can just drop var without another search for extractions of it
+            exs.include(var);
+            fvs = exs.getCovering(fvs);
+            fvs.erase(var);
+        } else
+            fvs = exs.getCovering(fvs);
 
-        // minimize vars_ (there might be entries which are covered by another extraction in exs)
-        st = exs.getCovering(st);
-
-        // FV(lam x.e) = FV(e) \ {x}
-        if (auto var = def->has_var()) st.erase(var);
-
-        // the free var set is stored in the state
-        return st;
+        return fvs;
     }
-
-    constexpr auto is_closed(const Def* def) const { return def->is_closed(); }
-    constexpr auto is_open(const Def* def) const { return def->is_open(); }
 
 private:
-    GIDNodeMap<const Def*, DefSet> fvs_;
+    Cache fvs_, ///< stores computed free var sets (only after finished computation)
+          exts_ ///< caches local_extracts
+    ;
 
-    /// get the internal state of a Def (creates it if needed)
-    DefSet& get_state(const Def* def) {
-        if (fvs_.contains(def)) return fvs_.at(def);
+    // calculates a set of Vars and Var extractions that are found by following deps
+    const DefSet& local_extracts(const Def* def) {
+        assert(!def->isa_mut() && "local_extracts() does not take mutables, only immutables");
 
-        // create new state empty state for def
-        auto& st = fvs_[def]; // default initializes the state
+        if (exts_.contains(def)) return exts_.at(def);
 
-        // init local vars
+        auto& exts = exts_[def];
+
+        // collect Vars/Extracts of Vars that are reachable (by following immutable deps())
         if (def->isa<Var>())
-            st.insert(def);
+            exts.insert(def);
         else if (auto ext = def->isa<Extract>(); ext && EXAnalysis::getVarOfExt(ext))
-            st.insert(def);
+            exts.insert(def);
         else
-            for (auto dep : def->deps())
-                for (auto v : local_vars(dep))
-                    st.insert(v);
+            for (auto dep : def->deps()) {
+                if (dep->isa_mut()) continue; // skip mutables, for those local_extracts is not callable and is per definition {}
+                for (auto v : local_extracts(dep))
+                    exts.insert(v);
+            }
 
-        return st;
+        return exts;
     }
-
-    /// Var%s reachable by following *immutable* deps().
-    DefSet local_vars(const Def* expr) { return expr->is_mutable() ? DefSet{} : get_state(expr); }
 };
 
 } // namespace mim::plug::clos2

@@ -80,7 +80,7 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
         assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
         auto [c, _] = procedure_pi->doms<2>();
         auto [_, e] = c->projs<2>();
-        assert(Checker::alpha<Checker::Test>(e, environment->type()) && "procedure does not accept env as its first argument");
+        assert(Check::alpha<Check::T>(e, environment->type()) && "procedure does not accept env as its first argument");
     }
 
     auto [code_t, env_t] = closure_type(dom)->projs<2>();
