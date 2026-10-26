@@ -8,10 +8,7 @@ plugin cps;
 // define a custom pipeline for optimization
 extern lam _compile(): compile.Phase =
     compile.phases ff (
-        // in general I want to perform cps.conv before anything else.
-        // TODO: uncomment
         compile.named "cps.conv",
-
         compile.named "clos2.hoist_up",
         compile.named "clos2.absclos_elim",
     );

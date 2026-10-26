@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// A multi-component environment mixing a pointer and a tuple.
+
 plugin core;
 plugin mem;
 import pipeline;

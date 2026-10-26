@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Two more escape routes: transitively, inside an outer closure that itself escapes; and packed into a tuple.
+
 plugin core;
 
 import pipeline;

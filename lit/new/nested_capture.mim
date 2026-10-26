@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Transitive capture through three nesting levels: `lvl3`'s environment must gather `a`, `b` and `c` from three different binders.
+
 plugin core;
 plugin mem;
 import pipeline;

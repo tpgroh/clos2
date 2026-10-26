@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// A single-element environment - the `fvs.size() == 1` path, where the environment is the captured value itself rather than a tuple.
+
 plugin core;
 plugin mem;
 import pipeline;

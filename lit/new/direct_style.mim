@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Direct-style `fun` with `ret`: one closure called from two sites, so a single procedure must serve both.
+
 plugin core;
 plugin mem;
 import pipeline;

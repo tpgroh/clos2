@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Two closures of the same type with different environments are alive simultaneously and both called.
+
 plugin core;
 plugin mem;
 import pipeline;

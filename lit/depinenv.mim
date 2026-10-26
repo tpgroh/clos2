@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// An escaping closure whose *type* depends on `m`, and `m` is itself part of its environment - the case clos2 resolves with an unsafe cast instead of a type-level equality.
+
 plugin core;
 
 import pipeline;

@@ -1,6 +1,6 @@
 // RUN: %mim -I %S/.. %s -o -
 
-// The free var `n` only occurs below type-level arithmetic.
+// `n` occurs only inside normalized type-level arithmetic (`core.nat.add (n, 1)`, `core.nat.mul (n, 2)`), never as a bare `Idx n`.
 
 plugin core;
 plugin mem;

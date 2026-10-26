@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Non-local exit: a loop escapes through a `found` continuation supplied by its caller.
+
 plugin core;
 plugin mem;
 import pipeline;

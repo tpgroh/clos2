@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Basic blocks as first-class values: stored to memory, loaded back, and selected by a runtime branch.
+
 plugin core;
 plugin mem;
 import pipeline;

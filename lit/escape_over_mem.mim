@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// A closure round-trips through memory: stored by one extern, loaded and called by another, with no static link between them.
+
 plugin core;
 plugin mem;
 

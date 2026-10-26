@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Closures capturing closures: `compose` returns `fg` over `f` and `g`, and is then applied to its own result.
+
 plugin core;
 plugin mem;
 import pipeline;

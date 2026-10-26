@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Non-escaping `where`-bound basic blocks: a recursive loop whose blocks capture `n`, `acc` and the return continuation.
+
 plugin core;
 plugin mem;
 

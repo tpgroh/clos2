@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Two closures with the same dependent type but different environments, used interchangeably at one call site - Requirement 1.
+
 plugin core;
 
 import pipeline;

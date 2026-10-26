@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Direct-style `fun`/`ret` sugar: a closure over one captured scalar is returned, then called at a second site.
+
 plugin core;
 
 import pipeline;

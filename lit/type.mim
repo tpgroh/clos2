@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// A polymorphic extern with a `*`-typed parameter but a closed return type; a regression guard that the pipeline survives type arguments.
+
 plugin core;
 
 import pipeline;

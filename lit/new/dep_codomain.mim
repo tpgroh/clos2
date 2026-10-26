@@ -1,6 +1,6 @@
 // RUN: %mim -I %S/.. %s -o -
 
-// The closures' own types are dependent: the continuation's domain depends on the argument `k`.
+// The closures' own types are dependent: `fill`'s continuation domain depends on its argument `k`, and in `store_fill_idx` on the captured `n` as well.
 
 plugin core;
 plugin mem;

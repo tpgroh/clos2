@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// Mutual recursion: `even`/`odd` capture `off` and `return`, exercising the cycle breaking in both the free-var analysis and the worklist.
+
 plugin core;
 plugin mem;
 import pipeline;

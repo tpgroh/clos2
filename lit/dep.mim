@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Dependent types across an extern boundary: in an argument, in a return type, and in a local continuation whose domain mentions the captured `m`.
+
 plugin core;
 
 import pipeline;

@@ -1,5 +1,7 @@
 // RUN: %mim -I %S/.. %s -o -
 
+// An array of closures: four distinct environments written into `«4; F»` by one loop and invoked by another.
+
 plugin core;
 plugin mem;
 import pipeline;

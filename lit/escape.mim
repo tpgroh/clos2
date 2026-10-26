@@ -1,5 +1,7 @@
 // RUN: %mim -I %S %s -o -
 
+// Three ways an anonymous closure escapes: returned, stored to memory, and passed to a function that stores it.
+
 plugin core;
 plugin mem;
 
