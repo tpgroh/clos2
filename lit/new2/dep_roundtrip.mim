@@ -1,0 +1,22 @@
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
+
+// A closure whose type is dependent is stored, loaded back and called within the same function,
+// so a telescope reaches closure_apply through a value that came out of mem.load.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+lam Getter (n: Nat): * = Cn [mem.M 0, Idx n, Cn [mem.M 0, I32]];
+
+extern con store_and_call (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», i: Idx n, return: Cn [mem.M 0, I32]) =
+    let (m, slot) = mem.alloc (Getter n, 0) m;
+
+    con get (m: mem.M 0, j: Idx n, k: Cn [mem.M 0, I32]) = k (mem.load (m, mem.lea (arr, j)));
+
+    let m      = mem.store (m, slot, get);
+    let (m, g) = mem.load (m, slot);
+    g (m, i, return);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

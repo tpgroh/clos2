@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Non-escaping `where`-bound basic blocks: a recursive loop whose blocks capture `n`, `acc` and the return continuation.
 
@@ -28,3 +28,6 @@ extern fun count (n : I32) : I32 =
 extern fun test(argc: I32): I32 =
     ret x = count $ argc;
     return x;
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

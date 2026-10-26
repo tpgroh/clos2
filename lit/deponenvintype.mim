@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Two closures with the same dependent type but different environments, used interchangeably at one call site - Requirement 1.
 
@@ -25,3 +25,6 @@ extern fun test (n:Nat, m:Nat) :I32 =
     ret y = apply $ get2;
 
     return (core.wrap.add 0 (x,y));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

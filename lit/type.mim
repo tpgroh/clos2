@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // A polymorphic extern with a `*`-typed parameter but a closed return type; a regression guard that the pipeline survives type arguments.
 
@@ -15,3 +15,6 @@ extern fun poly_first (T:*, v:«2;T») : I32 = return 0I32;
 extern fun test(argc: I32): I32 =
     ret x = poly_first $ (I32, (argc, argc));
     return x;
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

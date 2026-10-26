@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // An array of closures: four distinct environments written into `«4; F»` by one loop and invoked by another.
 
@@ -29,3 +29,6 @@ extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), retu
         (done, store)#(i < 4I32) m;
 
     fill (m, 0I32);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

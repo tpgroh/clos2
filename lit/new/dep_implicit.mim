@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Implicit dependent binders that only show up in the types of local closures.
 
@@ -15,3 +15,6 @@ extern con entry (m: mem.M 0, n: Nat, i: Idx n, out: mem.Ptr0 (Cn [mem.M 0, Cn [
 
 extern con entry_lit (m: mem.M 0, out: mem.Ptr0 (Cn [mem.M 0, Cn [mem.M 0, Idx 5]]), return: Cn [mem.M 0]) =
     with_idx (m, 3₅, out, return);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

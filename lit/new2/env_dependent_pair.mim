@@ -1,0 +1,22 @@
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
+
+// The one captured value has a dependent (mutable Sigma) type, so `var(1, 0)` must stay a real extract
+// instead of collapsing via `Def::proj`'s `a == 1` shortcut. The closure's own type stays closed.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+let G = Cn [mem.M 0, Cn [mem.M 0, Nat]];
+
+con wrap (m: mem.M 0, p: [n: Nat, Idx n], return: Cn [mem.M 0, G]) =
+    con get (m: mem.M 0, k: Cn [mem.M 0, Nat]) =
+        let (n, i) = p;
+        k (m, n);
+    return (m, get);
+
+extern con entry (m: mem.M 0, n: Nat, i: Idx n, return: Cn [mem.M 0, Nat]) =
+    wrap (m, (n, i), cn (m: mem.M 0, g: G) = g (m, return));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Dependent types across an extern boundary: in an argument, in a return type, and in a local continuation whose domain mentions the captured `m`.
 
@@ -21,3 +21,6 @@ extern fun test(m:Nat): I32 =
         return x;
 
     get_wr (m, k);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

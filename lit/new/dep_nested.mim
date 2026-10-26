@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // `inner`'s type mentions `k` from `outer` and `n` from `store_outer`.
 
@@ -14,3 +14,6 @@ extern con store_outer (m: mem.M 0, n: Nat, x: Idx n, out: mem.Ptr0 (Outer n), r
         con inner (m: mem.M 0, y: Idx k, c: Cn [mem.M 0, [Idx n, Idx k]]) = c (m, (x, y));
         cont (m, inner);
     return (mem.store (m, out, outer));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

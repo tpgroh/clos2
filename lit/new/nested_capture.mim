@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Transitive capture through three nesting levels: `lvl3`'s environment must gather `a`, `b` and `c` from three different binders.
 
@@ -20,3 +20,6 @@ extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), retu
             call (m, lvl3, 4I32, k2);
         call (m, lvl2, 3I32, k1);
     call (m, lvl1, 2I32, return);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

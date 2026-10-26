@@ -1,0 +1,25 @@
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
+
+// Only one leaf of a nested tuple parameter is captured, so the free var is `var#1#0#1`.
+// Exercises getVarOfExt's peeling and getCovering's t-recursion to the top-most covering extract.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+let F = Cn [mem.M 0, I32, Cn [mem.M 0, I32]];
+
+con host (m: mem.M 0, p: [[I32, I32], I32], return: Cn [mem.M 0, F]) =
+    con esc (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) =
+        let (inner, _) = p;
+        let (_, b)     = inner;
+        k (m, x + b);
+    return (m, esc);
+
+extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), return: Cn [mem.M 0, I32]) =
+    host (m, ((argc, argc + 1I32), argc * 2I32), cn (m: mem.M 0, f: F) = f (m, 1I32, return));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

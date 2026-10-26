@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Two more escape routes: transitively, inside an outer closure that itself escapes; and packed into a tuple.
 
@@ -19,3 +19,6 @@ extern fun make_pair (base1 base2: I32): [Fn I32 -> I32, Fn I32 -> I32] =
 
 extern fun make_tagged (tag base: I32): [I32, Fn I32 -> I32] =
     return (tag, fn (x: I32) = return (x + base));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

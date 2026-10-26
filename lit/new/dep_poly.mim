@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Free type variables: closures whose types and environments mention a captured `T: *`.
 
@@ -32,3 +32,6 @@ extern con swap_twice (T: *, m: mem.M 0, p: [T, T], return: Cn [mem.M 0, [T, T]]
 extern con poly_vec (T: *, n: Nat, m: mem.M 0, v: «n; T», out: mem.Ptr0 (Cn [mem.M 0, Idx n, Cn [mem.M 0, T]]), return: Cn [mem.M 0]) =
     con at (m: mem.M 0, i: Idx n, k: Cn [mem.M 0, T]) = k (m, v#i);
     return (mem.store (m, out, at));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

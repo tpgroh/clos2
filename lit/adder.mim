@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Direct-style `fun`/`ret` sugar: a closure over one captured scalar is returned, then called at a second site.
 
@@ -16,3 +16,6 @@ extern fun test(argc: I32): I32 =
     ret add2 = make_adder $ argc;
     ret x = add2 $ 0I32;
     return x;
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

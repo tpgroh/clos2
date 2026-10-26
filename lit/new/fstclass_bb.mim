@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Basic blocks as first-class values: stored to memory, loaded back, and selected by a runtime branch.
 
@@ -19,3 +19,6 @@ extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), retu
     let m         = mem.store (m, slot, on_true);
     let (m, k)    = mem.load (m, slot);
     choose (m, argc == 1I32, k, on_false);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

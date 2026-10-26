@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // `n` occurs only inside normalized type-level arithmetic (`core.nat.add (n, 1)`, `core.nat.mul (n, 2)`), never as a bare `Idx n`.
 
@@ -16,3 +16,6 @@ extern con store_dbl (m: mem.M 0, n: Nat, out: mem.Ptr0 (Cn [mem.M 0, Idx n, Cn 
     con dbl (m: mem.M 0, i: Idx n, k: Cn [mem.M 0, Idx (core.nat.mul (n, 2))]) =
         k (m, core.conv.u (core.nat.mul (n, 2)) i);
     return (mem.store (m, out, dbl));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

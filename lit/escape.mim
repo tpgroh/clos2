@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // Three ways an anonymous closure escapes: returned, stored to memory, and passed to a function that stores it.
 
@@ -24,3 +24,6 @@ extern fun install (m: mem.M 0, f: Fn I32 -> I32, slot: mem.Ptr0 (Fn I32 -> I32)
 extern fun make_and_install (m: mem.M 0, base: I32, slot: mem.Ptr0 (Fn I32 -> I32)): mem.M 0 =
     ret m = install $ (m, fn (x: I32) = return (x + base), slot);
     return m;
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

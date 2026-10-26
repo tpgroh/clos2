@@ -1,0 +1,22 @@
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
+
+// A dependent closure escapes across an extern boundary: `put` writes a `Getter n`, `take` reads a
+// `Getter n2` out of the same slot type. Each extern checks on its own, and nothing relates `n` to `n2` -
+// that correspondence is the caller's obligation, which is the hole the unsafe cast leaves open.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+lam Getter (n: Nat): * = Cn [mem.M 0, Idx n, Cn [mem.M 0, I32]];
+
+extern con put (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», out: mem.Ptr0 (Getter n), return: Cn [mem.M 0]) =
+    con get (m: mem.M 0, j: Idx n, k: Cn [mem.M 0, I32]) = k (mem.load (m, mem.lea (arr, j)));
+    return (mem.store (m, out, get));
+
+extern con take (m: mem.M 0, n2: Nat, slot: mem.Ptr0 (Getter n2), i: Idx n2, return: Cn [mem.M 0, I32]) =
+    let (m, g) = mem.load (m, slot);
+    g (m, i, return);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

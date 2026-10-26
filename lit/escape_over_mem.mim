@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // A closure round-trips through memory: stored by one extern, loaded and called by another, with no static link between them.
 
@@ -22,3 +22,6 @@ extern fun store_and_call (m: mem.M 0, base arg: I32): [mem.M 0, I32] =
     ret m = store_fn $ (m, base, slot);
     ret (m,y) = call_fn $ (m, slot, arg);
     return (m, y);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

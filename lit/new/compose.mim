@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Closures capturing closures: `compose` returns `fg` over `f` and `g`, and is then applied to its own result.
 
@@ -20,3 +20,6 @@ extern con main (m: mem.M 0, argc: I32, argv: mem.Ptr (mem.Ptr (I8, 0), 0), retu
     con dbl (m: mem.M 0, x: I32, k: Cn [mem.M 0, I32]) = k (m, x * 2I32);
     compose (m, inc, dbl, cn (m: mem.M 0, h: F) =
         compose (m, h, h, cn (m: mem.M 0, hh: F) = hh (m, 3I32, return)));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

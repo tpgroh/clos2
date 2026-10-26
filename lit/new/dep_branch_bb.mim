@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // Basic blocks with dependently typed domains used as branch targets and as first-class values.
 
@@ -19,3 +19,6 @@ extern con stash (m: mem.M 0, n: Nat, i: Idx n, slot: mem.Ptr0 (Cn [mem.M 0, Idx
     let m      = mem.store (m, slot, return);
     let (m, k) = mem.load (m, slot);
     k (m, i);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

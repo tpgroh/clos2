@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // A closure is returned whose type depends on the creator's argument, once directly and once packed with it.
 
@@ -24,3 +24,6 @@ extern con store_getter (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», out: mem.
 
 extern con store_packed (m: mem.M 0, n: Nat, arr: mem.Ptr0 «n; I32», out: mem.Ptr0 [k: Nat, Getter k], return: Cn [mem.M 0]) =
     make_packed (m, n, arr, cn (m: mem.M 0, p: [k: Nat, Getter k]) = return (mem.store (m, out, p)));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

@@ -1,4 +1,4 @@
-// RUN: %mim -I %S/.. %s -o -
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
 
 // `ident` has no free value vars; `n` only occurs in its type.
 
@@ -17,3 +17,6 @@ extern con store_ident (m: mem.M 0, n: Nat, out: mem.Ptr0 (IdxFn n), return: Cn 
 extern con call_ident (m: mem.M 0, n: Nat, i: Idx n, return: Cn [mem.M 0, Idx n]) =
     con ident (m: mem.M 0, j: Idx n, k: Cn [mem.M 0, Idx n]) = k (m, j);
     apply (m, ident, i, return);
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno

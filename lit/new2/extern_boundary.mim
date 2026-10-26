@@ -1,0 +1,22 @@
+// RUN: %mim -I %S/.. %s -o - | %FileCheck %s
+// XFAIL: *
+
+// An extern's own return continuation is part of its calling convention and must stay a `Cn`,
+// while a `Cn` reached through a `Ptr` is a function value and must become a closure.
+// Known limitation: clos2 currently converts both, so `return` comes out as a (code, Env) pair.
+
+plugin core;
+plugin mem;
+import pipeline;
+
+use core.ops.u.w;
+
+extern con store_cb (m: mem.M 0, x: I32, out: mem.Ptr0 (Cn [mem.M 0, I32, Cn [mem.M 0, I32]]), return: Cn [mem.M 0]) =
+    con cb (m: mem.M 0, y: I32, k: Cn [mem.M 0, I32]) = k (m, y + x);
+    return (mem.store (m, out, cb));
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno
+
+// the return continuation must not have been rewritten into a (code, Env) pair
+// CHECK-NOT: clos2.Env) as return

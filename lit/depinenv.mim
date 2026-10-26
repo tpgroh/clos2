@@ -1,4 +1,4 @@
-// RUN: %mim -I %S %s -o -
+// RUN: %mim -I %S %s -o - | %FileCheck %s
 
 // An escaping closure whose *type* depends on `m`, and `m` is itself part of its environment - the case clos2 resolves with an unsafe cast instead of a type-level equality.
 
@@ -11,3 +11,6 @@ use core.ops.s.w;
 extern fun make_adder (m: Nat, n: Idx m) : Fn Idx m → Idx m =
     let f = fn (x: Idx m) = return (x + n);
     return f;
+
+// every abstract closure must be eliminated by clos2.absclos_elim
+// CHECK-NOT: clos2.anno
