@@ -229,3 +229,88 @@ static void check_cyclic_fvs(bool up_first) {
 
 TEST_CASE("clos2.internals_cyclic_fresh") { check_cyclic_fvs(false); }
 TEST_CASE("clos2.internals_cyclic_cached") { check_cyclic_fvs(true); }
+
+// regression test: a common ancestor that reaches *both* members of a cycle directly.
+// The existing cyclic test enters the cycle through a single member, which always worked:
+// the entry point of a traversal is exact. Here `outer` asks for `e` and for `o`, and the
+// one that was not the entry point must not be served from a half computed result.
+// lam outer (a, b : I32) : I32 = e a + o a
+// where lam e (x : I32) : I32 = o x + b
+//       lam o (y : I32) : I32 = e y + b   <- cycle e -> o -> e, both reachable from outer
+static void check_mutual_siblings(bool members_first) {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto outer  = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
+    auto [a, b] = outer->vars<2>();
+    auto e      = w.mut_lam(w.type_i32(), w.type_i32());
+    auto o      = w.mut_lam(w.type_i32(), w.type_i32());
+    e->set(false, w.call(core::wrap::add, core::Mode::none, Defs{w.app(o, e->var()), b}));
+    o->set(false, w.call(core::wrap::add, core::Mode::none, Defs{w.app(e, o->var()), b}));
+    outer->set(false, w.call(core::wrap::add, core::Mode::none, Defs{w.app(e, a), w.app(o, a)}));
+
+    clos2::FVAnalysis ana;
+
+    // querying a member first makes it a traversal root, so it is cached as an exact result
+    if (members_first) {
+        auto fvs = ana.free_vars(e);
+        CHECK(fvs.size() == 1);
+        CHECK(fvs.contains(b));
+    }
+
+    auto fvs = ana.free_vars(outer);
+    CHECK(fvs.size() == 0);
+    CHECK(!fvs.contains(e->var())); // the bug: e's own var leaked out through o's cached entry
+    CHECK(!fvs.contains(o->var()));
+
+    fvs = ana.free_vars(e);
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(b));
+
+    fvs = ana.free_vars(o);
+    CHECK(fvs.size() == 1);
+    CHECK(fvs.contains(b));
+}
+
+TEST_CASE("clos2.internals_mutual_siblings_fresh") { check_mutual_siblings(false); }
+TEST_CASE("clos2.internals_mutual_siblings_cached") { check_mutual_siblings(true); }
+
+// a three member cycle where only the last member mentions the free var, so every other member
+// can only learn about it by going around the cycle. `outer` asks for all three, so two of them
+// are recomputed as traversal roots after having been discarded.
+// lam outer (a, b : I32) : I32 = f a + (g a + h a)
+// where lam f (x : I32) : I32 = g x
+//       lam g (x : I32) : I32 = h x
+//       lam h (x : I32) : I32 = f x + b   <- only h mentions b
+TEST_CASE("clos2.internals_cycle3_shared_ancestor") {
+    Driver driver;
+    auto& w = driver.world();
+    ast::load_plugin(w, "core");
+
+    auto outer  = w.mut_lam(w.arr(2, w.type_i32()), w.type_i32());
+    auto [a, b] = outer->vars<2>();
+    auto f      = w.mut_lam(w.type_i32(), w.type_i32());
+    auto g      = w.mut_lam(w.type_i32(), w.type_i32());
+    auto h      = w.mut_lam(w.type_i32(), w.type_i32());
+    f->set(false, w.app(g, f->var()));
+    g->set(false, w.app(h, g->var()));
+    h->set(false, w.call(core::wrap::add, core::Mode::none, Defs{w.app(f, h->var()), b}));
+    outer->set(false,
+               w.call(core::wrap::add, core::Mode::none,
+                      Defs{w.app(f, a), w.call(core::wrap::add, core::Mode::none, Defs{w.app(g, a), w.app(h, a)})}));
+
+    clos2::FVAnalysis ana;
+
+    auto fvs = ana.free_vars(outer);
+    CHECK(fvs.size() == 0);
+
+    for (auto mut : {f, g, h}) {
+        fvs = ana.free_vars(mut);
+        CHECK(fvs.size() == 1);
+        CHECK(fvs.contains(b)); // reachable only around the cycle for f and g
+        CHECK(!fvs.contains(f->var()));
+        CHECK(!fvs.contains(g->var()));
+        CHECK(!fvs.contains(h->var()));
+    }
+}

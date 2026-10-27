@@ -8,37 +8,39 @@ namespace mim::plug::clos2 {
 
 class FVAnalysis {
 private:
-    // I have to use NodeMap because I require pointer/reference stability
-    using Cache = GIDNodeMap<const Def*, DefSet>;
-
 public:
     // calculate the set of free vars/var extractions
     DefSet free_vars(const Def* def) {
         EXAnalysis exs{def};
 
-        // this temporary cache is used to break cycles.
-        // it stores partial sets of free vars which might not be complete. (because of cycles)
-        // note that the result of free_vars is a complete set, to use a single cache I must use fixedpoint solving
-        Cache cache{};
+        // this is used to break cycles without having to implement fixed point solving
+        // this allowes free_vars to keep track of what defs are currently on the call stack.
+        // NOTE: this is used as FIFO thus there might be a faster datastructure
+        DefSet active{};
 
         // calculate solution and store it in the permanant cache
-        auto fvs = free_vars(def, exs, cache);
+        // the calculated set is correct because it is the union of all reachable free vars.
+        // where the free var set we take the union over can only be missing free vars that are allready included
+        // somewhere in another set
+        auto [fvs, _] = free_vars(def, exs, active);
         fvs_[def] = fvs;
 
         return fvs;
     }
 
+private:
     // calculate free_vars of def
     // note that this function must not write to fvs_, as fvs of a def here might be only a partial free var set
     // instead use the temporary cache, which we throw away after afterwards. this way I dont require fixed point
     // solving
-    DefSet free_vars(const Def* def, EXAnalysis& exs, Cache& cache) {
+    std::pair<DefSet, bool> free_vars(const Def* def, EXAnalysis& exs, DefSet& active) {
         // use cached result if it exists
-        if (fvs_.contains(def)) return fvs_.at(def);
-        if (cache.contains(def)) return cache.at(def);
+        if (fvs_.contains(def)) return {fvs_.at(def), false};
+        if (active.contains(def)) return {DefSet{}, true};
 
-        // collect inside of the temporary cache
-        auto& fvs = cache[def];
+        // create fvs set and enqueue def to te active list
+        auto fvs = DefSet{};
+        active.insert(def);
 
         // first we have to collect all local_extractions
         // if def is immutable then we use local_extracts()
@@ -55,19 +57,24 @@ public:
         if (auto ext = def->isa<Extract>(); def->isa<Var>() || (ext && EXAnalysis::getVarOfExt(ext))) {
             // here fvs is { def } which is the correct free vars set of def, thus no getCovering required
             assert(fvs.size() == 1);
-            return fvs;
+            return {fvs, false};
         }
 
         // now we have to add the missing free_vars of reachable mutables. for this we can use local_muts()
         // I keep the loop over the deps because def might be a mutable itself
+        bool tainted = false;
         for (auto op : def->deps()) {
             for (auto mut : op->local_muts()) {
                 assert(mut->is_set()); // I use this phase only on already complete worlds which we dont modify. thus mut is set
 
                 // I don't want to polute the extraction set of mut so I create a new one which I then include in
                 // the current one
+                // when free_vars returned early with tainted set then exs2 does not contain any new extractions
+                // it should still be correct because the extractions that would have been added are allready somewhere down
+                // the callstack and because tainted is set we throw away any results at least up to that def's free_vars call
                 EXAnalysis exs2{mut};
-                auto fvs2 = free_vars(mut, exs2, cache);
+                auto [fvs2, t] = free_vars(mut, exs2, active);
+                tainted |= t; // if at least one free_vars call was tainted then this one is tainted as well
                 exs.include(exs2);
 
                 for (auto v : fvs2)
@@ -85,12 +92,21 @@ public:
         } else
             fvs = exs.getCovering(fvs);
 
-        return fvs;
+        // dequeue def from active
+        active.erase(def);
+
+        // if the result is not tainted than it is correct for the same reason as in the public facing free_vars
+        // and we can store the result in the fvs_ cache
+        if (!tainted) fvs_[def] = fvs;
+
+        // if the result was tainted we propagete that down the call stack
+        return {fvs, tainted};
     }
 
-private:
-    Cache fvs_, ///< stores computed free var sets (only after finished computation)
-          exts_ ///< caches local_extracts
+    // TODO: I should check if the following comment still holds, I think for fvs_ it is wrong
+    // I have to use NodeMap because I require pointer/reference stability
+    GIDNodeMap<const Def*, DefSet> fvs_, ///< stores computed free var sets (only after finished computation)
+                                   exts_ ///< caches local_extracts
     ;
 
     // calculates a set of Vars and Var extractions that are found by following deps
