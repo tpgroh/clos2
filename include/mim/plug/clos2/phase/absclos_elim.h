@@ -43,7 +43,10 @@
 ///     * requirement 2: this should be possible
 ///     * requirement 3: here Im missing the flat closure representation
 ///         this should also enable requirement 7
-///
+/// - I also still have the problem of free vars accuring inside the type. in this case after hoistup the type of the argument would depend on the environment which gets
+/// cast away
+///   here my idea was to kep the vars free. inside the procedure's type this dependency is fine, as the type does not get thrown away there.
+///   but in the actual closure type I want to inline the environment inside the type to which we cast the procedure
 
 namespace mim::plug::clos2 {
 
@@ -70,25 +73,24 @@ inline const Sigma* isa_closure_type(const Def* def) {
     return nullptr;
 }
 
-inline const Def* pack(const Lam* procedure, const Def* environment, const Def* dom) {
+inline const Def* pack(const Lam* procedure, const Def* environment, const Def* clos_t) {
     auto& w       = procedure->world();
     w.log().d("pack {} with {}", procedure, environment);
 
     // check that the calling convention holds until here
-    {
-        auto procedure_pi = procedure->type()->isa<Pi>();
-        assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
-        auto [c, _] = procedure_pi->doms<2>();
-        auto [_, e] = c->projs<2>();
-        assert(Check::alpha<Check::T>(e, environment->type()) && "procedure does not accept env as its first argument");
-    }
+    auto procedure_pi = procedure->type()->isa<Pi>();
+    assert(procedure_pi && procedure_pi->num_doms() == 2 && "procedure domain should have arity 2");
+    auto [c, _] = procedure_pi->doms<2>();
+    auto [_, e] = c->projs<2>();
+    auto env = Check::coerce(e, environment);
+    assert(env && "procedure does not accept env as its first argument");
 
-    auto [code_t, env_t] = closure_type(dom)->projs<2>();
-    w.log().d("using code_t {}", code_t);
-    w.log().d("using env_t {}", env_t);
+    auto [code_t, env_t] = clos_t->projs<2>();
+    w.log().d("casting {}:{} to code_t {}", procedure->type(), procedure->type()->unfold_type(), code_t);
+    w.log().d("casting {}:{} to env_t {}", env->type(), env->type()->unfold_type(), env_t);
     return w.tuple({
         w.call<clos2::unsafe_cast>(code_t, procedure),
-        w.call<clos2::unsafe_cast>(env_t, environment)
+        w.call<clos2::unsafe_cast>(env_t, env)
     });
 }
 
@@ -124,22 +126,21 @@ private:
 
     const Def* create_closure(Axm::IsA<anno, App> a) {
         log().d("create closure {}", a);
-        
+
         auto app = a->arg()->as<App>();
         auto old_proc = app->callee()->as_mut<Lam>();
         auto new_proc = rewrite_procedure(old_proc);
         auto environment = rewrite(app->arg());
-        auto dom = rewrite(a->type()->as<Pi>()->dom());
-        log().d("cc using dom {}", dom);
-
-        return Closure::pack(new_proc, environment, rewrite(a->type()->as<Pi>()->dom()));
+        auto old_pi = a->type()->as<Pi>();
+        assert(Pi::isa_cn(old_pi) && "the Pi type of a closure should be a Cn");
+        auto clos_t = rewrite(a->type());
+        return Closure::pack(new_proc, environment, clos_t);
     }
 
     // abstract closure elim and closure application
     const Def* rewrite_imm_App(const App* app) {
         log().d("rewrite_imm_App {}", app);
         if (auto a = Axm::isa<anno>(app)) return create_closure(a);
-        log().d("but not create_closure");
 
         auto new_arg = rewrite(app->arg());
         auto new_callee = rewrite(app->callee());
@@ -147,8 +148,8 @@ private:
         // if the callee is not a Pi then it is a closure
         if (Closure::isa_closure_type(new_callee->type()))
             return Closure::closure_apply(new_callee, new_arg); // this enforces that we use the calling convention
-
-        log().d("also no closure application thus RWPhase rewrite");
+        
+        log().d("rewrite_imm_App {}  ~>", app);
         log().d("new_callee {}:{}", new_callee, new_callee->type());
         log().d("new_arg {}:{}", new_arg, new_arg->type());
 

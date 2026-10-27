@@ -51,6 +51,7 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
     bind_new(proc->var()->isa<Var>());
 
     // TODO: I should be able to use map for this. procedure is closed. thus it should fall through to the root scope
+    // the lookup above could then be replaced by a lookup() call. this only changes where this is stored.
     procedures_[old_proc] = proc;
 
     log().d("new proc {}:{}", proc, proc->type());
@@ -69,9 +70,8 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
         }
     }
 
-    map(old_proc->var(), proc->var(2, 0)->proj(2, 1));
-    if (auto mlam = old_lam->isa_mut<Lam>())
-        map(mlam->var(), proc->var(2,1));
+    if (auto v = old_proc->has_var()) map(v, proc->var(2, 0)->proj(2, 1));
+    if (auto v = old_lam->has_var()) map(v, proc->var(2,1));
     proc->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
     pop();
 
