@@ -112,8 +112,6 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 }
 
 void HoistUp::finalize() {
-    auto& w = new_world();
-
     while (!worklist_.empty()) {
         auto stub = worklist_.front();
         worklist_.pop();
