@@ -8,7 +8,17 @@ plugin cps;
 // define a custom pipeline for optimization
 extern lam _compile(): compile.Phase =
     compile.phases ff (
+        compile.eta_conv,
         compile.named "cps.conv",
+
+        // TODO: for now I make the assumption that I can just reuse the eta_conv phase
+        // the idea is that when I have a lambda that is used as a return continuation
+        // and also as a first class use which is not as a return continuation.
+        // then I have to close it at the one place, but not at the other
+        // (I dont want to close return continuations)
+        // by wrapping both I should get around that.
+        compile.eta_conv,
+
         compile.named "clos2.hoist_up",
         compile.named "clos2.absclos_elim",
     );
