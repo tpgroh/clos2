@@ -48,6 +48,11 @@
 ///   here my idea was to kep the vars free. inside the procedure's type this dependency is fine, as the type does not get thrown away there.
 ///   but in the actual closure type I want to inline the environment inside the type to which we cast the procedure
 
+
+// Notes about this rewrite phase.
+// It is designed to run directly after hoistup, there we already make sure that we only have mutable Lambdas
+// TODO FIXME how to handle immutable lambdas
+
 namespace mim::plug::clos2 {
 
 namespace Closure {
@@ -73,7 +78,7 @@ inline const Sigma* isa_closure_type(const Def* def) {
     return nullptr;
 }
 
-inline const Def* pack(const Lam* procedure, const Def* environment, const Def* clos_t) {
+inline const Def* closure_pack(const Def* procedure, const Def* environment, const Def* clos_t) {
     auto& w       = procedure->world();
     w.log().d("pack {} with {}", procedure, environment);
 
@@ -83,7 +88,10 @@ inline const Def* pack(const Lam* procedure, const Def* environment, const Def* 
     auto [c, _] = procedure_pi->doms<2>();
     auto [_, e] = c->projs<2>();
     auto env = Check::coerce(e, environment);
-    assert(env && "procedure does not accept env as its first argument");
+    if (!env) {
+        procedure->blame("this procedure of type {} does not accept the passed environment {}:{} (coerce checked against {}", procedure, environment, environment->type(), e).bail();
+        assert(env && "procedure does not accept env as its first argument");
+    }
 
     auto [code_t, env_t] = clos_t->projs<2>();
     w.log().d("casting {}:{} to code_t {}", procedure->type(), procedure->type()->unfold_type(), code_t);
@@ -116,7 +124,7 @@ private:
 
     void rewrite_external (Def* mut) final {
         auto new_mut = rewrite(mut);
-        log().d("rewrite_external {}", mut);
+        log().d("rewrite_external {}:{}", mut, mut->type());
         auto fvs = new_mut->free_vars();
         log().d("new_mut has fvs {}", fvs);
         for (auto v : fvs)
@@ -126,15 +134,25 @@ private:
 
     const Def* create_closure(Axm::IsA<anno, App> a) {
         log().d("create closure {}", a);
+        
+        auto clos_t = rewrite(a->type());
 
-        auto app = a->arg()->as<App>();
+        if (auto it = selfclos_.find(a->arg()); it != selfclos_.end()) {
+            log().d("using passed closure insead of recreating");
+            auto [proc, env] = it->second->projs<2>();
+            return Closure::closure_pack(proc, env, clos_t);
+        }
+
+        auto app = a->arg()->isa<App>();
+
+        if (!app) a->blame("unexpected shape under anno.closure").bail();
+
         auto old_proc = app->callee()->as_mut<Lam>();
         auto new_proc = rewrite_procedure(old_proc);
         auto environment = rewrite(app->arg());
         auto old_pi = a->type()->as<Pi>();
         assert(Pi::isa_cn(old_pi) && "the Pi type of a closure should be a Cn");
-        auto clos_t = rewrite(a->type());
-        return Closure::pack(new_proc, environment, clos_t);
+        return Closure::closure_pack(new_proc, environment, clos_t);
     }
 
     // abstract closure elim and closure application
@@ -156,36 +174,68 @@ private:
         return new_world().app(new_callee, new_arg);
     }
 
-    /* currently I'm rewriting every Pi but I have to skip the Pi of a lambda */
-    const Def* rewrite_imm_Lam(const Lam* d) final {
-        log().d("rewrite_imm_Lam {}", d);
-        auto old_pi = d->type();
-        auto new_type   = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
-        auto new_filter = rewrite(d->filter());
-        auto new_body   = rewrite(d->body());
-        return new_world().lam(new_type, new_filter, new_body);
+    // We transform every pi to a closure type over the same things with some exeptions.
+    // - the pi type of lambdas is rewritten normaly to a pi type.
+    // - the return continuation of lambdas is also normaly rewritten.
+    const Def* conv_dom_pos(const Def* d, bool is_ret) {
+        if (auto pi = Pi::isa_cn(d); pi && is_ret) return new_world().cn(conv_dom(pi));
+        return rewrite(d);
     }
-    const Def* rewrite_mut_Lam(Lam* d) final {
-        log().d("rewrite_mut_Lam {}", d);
-        if (!Pi::isa_cn(d->type())) return map(d, rewrite_procedure(d));
-        auto old_pi = d->type();
-        const Pi* new_pi = (old_pi->isa_mut() ? RWPhase::rewrite_mut_Pi(old_pi->as_mut<Pi>()) : RWPhase::rewrite_imm_Pi(old_pi))->as<Pi>();
-        return rewrite_stub(d, new_world().mut_lam(new_pi));
+    const Def* conv_dom(const Pi* pi) {
+        if (!Pi::isa_returning(pi)) return rewrite(pi->dom());
+
+        auto& w = new_world();
+        auto dom = pi->dom();
+        auto n = pi->num_doms();
+
+        if (n == 1) return conv_dom_pos(dom, true);
+
+        assert(dom->isa<Sigma>() && "I expect the domain to be a sigma"); // TODO : is this true, what about pack
+
+        // rebuild telescope
+        if (auto tel = dom->isa_mut<Sigma>()) {
+            // TODO FIXME : the type pending here is dangerous
+            auto new_sig = w.mut_sigma(w.type_pending(), n);
+            push();
+            bind_old(tel->has_var());
+            bind_new(new_sig->var()->isa<Var>());
+            if (auto v = tel->has_var()) map(v, new_sig->var());
+            for (size_t i = 0; i < n-1; i++)
+                new_sig->set(i, conv_dom_pos(tel->op(i), i == n -1));
+            pop();
+            return new_sig;
+        }
+
+        return w.sigma(DefVec{n, [&](auto i){ return conv_dom_pos(pi->dom(n, i), i == n -1); }});
     }
 
     const Def* rewrite_mut_Pi(Pi* pi) final {
-        if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+        if (Pi::isa_cn(pi)) return Closure::closure_type(conv_dom(pi));
         return RWPhase::rewrite_mut_Pi(pi);
     }
 
     const Def* rewrite_imm_Pi(const Pi* pi) final {
-        if (Pi::isa_cn(pi)) return Closure::closure_type(rewrite(pi->dom()));
+        if (Pi::isa_cn(pi)) return Closure::closure_type(conv_dom(pi));
         return RWPhase::rewrite_imm_Pi(pi);
     }
 
+    const Def* rewrite_mut_Lam(Lam* d) final {
+        log().d("rewrite_mut_Lam {}", d);
+
+        if (!Pi::isa_cn(d->type())) d->blame("reachable mut lam should be continuations!").bail();
+
+        // we have to handle the exceptions of the pi rewrites here
+        auto old_pi = d->type();
+        auto new_pi = new_world().cn(conv_dom(old_pi), old_pi->is_implicit());
+
+        log().d("rewrite_mut_Lam {} has new type {}", d, new_pi);
+
+        return rewrite_stub(d, new_world().mut_lam(new_pi));
+    }
 
 private:
     DefMap<Lam*> procedures_{};
+    Def2Def      selfclos_{};
 };
 
 

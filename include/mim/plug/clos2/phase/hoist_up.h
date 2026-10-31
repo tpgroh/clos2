@@ -56,7 +56,7 @@ private:
             for (auto d : def->deps()) analyze_visit(d, Fst);
     }
 
-    bool analyze() {
+    bool analyze() final {
         for (auto r : old_world().externals().muts())
             analyze(r);
 

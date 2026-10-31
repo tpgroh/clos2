@@ -14,7 +14,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     auto fvset       = fvana_.free_vars(lam);
     auto fvs         = DefVec{fvset.begin(), fvset.end()};
-    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types)
+    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: only true for telescopes
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
     log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
@@ -80,8 +80,8 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     auto inner_lam = w.mut_lam(inner_pi);
 
     // set dbg keys
-    inner_lam->set(lam->dbg_key());
-    outer_lam->set(lam->dbg_key());
+    inner_lam->set(lam->sym());
+    outer_lam->set(lam->sym());
     outer_lam->set(false, inner_lam); // false filter because we dont want to just insert the environment back in
 
     // set argument dbg keys

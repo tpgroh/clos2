@@ -53,6 +53,7 @@ Lam* AbsClosElim::rewrite_procedure(Lam* old_proc) {
     // TODO: I should be able to use map for this. procedure is closed. thus it should fall through to the root scope
     // the lookup above could then be replaced by a lookup() call. this only changes where this is stored.
     procedures_[old_proc] = proc;
+    selfclos_[old_lam] = proc->var(2, 0);
 
     log().d("new proc {}:{}", proc, proc->type());
 
