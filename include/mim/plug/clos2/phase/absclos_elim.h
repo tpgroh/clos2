@@ -200,7 +200,7 @@ private:
             bind_old(tel->has_var());
             bind_new(new_sig->var()->isa<Var>());
             if (auto v = tel->has_var()) map(v, new_sig->var());
-            for (size_t i = 0; i < n-1; i++)
+            for (size_t i = 0; i < n; i++)
                 new_sig->set(i, conv_dom_pos(tel->op(i), i == n -1));
             pop();
             return new_sig;

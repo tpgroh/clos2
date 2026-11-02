@@ -20,7 +20,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // post processing of the free vars / environment
     for (size_t i = 0; i < fvs.size(); i++) {
         // peel up var in environment if it contains a return continuation to annotate it.
-        if (auto v = fvs[i]->isa<Var>(); Pi::isa_returning(v->binder()->type())) {
+        if (auto v = fvs[i]->isa<Var>(); v && Pi::isa_returning(v->binder()->type())) {
             auto n = environment[i]->num_projs();
             auto env = environment[i];
             environment[i] = w.tuple(DefVec{n, [&](auto i){
