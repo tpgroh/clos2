@@ -22,18 +22,22 @@ static const DefVec annotate_environment (DefVec environment) {
     auto& w = environment[0]->world();
 
     for (size_t i = 0; i < environment.size(); i++) {
-        auto n = environment[i]->num_projs();
         auto env = environment[i];
 
-        // peel up var in environment if it contains a return continuation to annotate it.
-        if (auto v = env->isa<Extract>() ? EXAnalysis::getVarOfExt(env->isa<Extract>()) : env->isa<Var>();
-            v && Pi::isa_returning(v->binder()->type()) && (env == v || env == v->proj(n, n-1))) {
-            environment[i] = w.tuple(DefVec{n, [&](auto i){
-                auto envp = env->proj(n, i);
-                return i != n -1 ? envp : annotate(envp, anno::captured_ret);
-            }});
+        // un peel var in environment if it contains a return continuation to annotate it.
+        auto v = env->isa<Extract>() ? EXAnalysis::getVarOfExt(env->isa<Extract>()) : env->as<Var>();
+        auto n = v->num_projs();
+        if (Pi::isa_returning(v->binder()->type())) {
+            if (env == v) {
+                environment[i] = w.tuple(DefVec{n, [&](auto i){
+                    auto envp = env->proj(n, i);
+                    return i != n -1 ? envp : annotate(envp, anno::captured_ret);
+                }});
+            } else if (env == v->proj(v->num_projs(), n-1)) {
+                environment[i] = annotate(env, anno::captured_ret);
+            }
         }
-
+        
         // TODO: later we might also want to remove/ make sure that we did not capture any mem.M typed things.
         // but I think that no harm is done here leaving it here wrong. it will be fixed by mem.add_mem (I hope)
         // in any case capturing the memory state is almost always wrong, because we want to work with the current state and not the one at creation.
