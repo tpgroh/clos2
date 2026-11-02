@@ -28,7 +28,10 @@ axm hoist_up: compile.Phase;
 /// TODO: put the transformation as tex formula here
 ///
 /// In the target world this "closure" is then marked as such using the following wrapper which's normalizer always rejects
-priv axm anno.(closure): {T:*} → T → T, normalize_anno;
+/// - absclos, abstract closure
+/// - captured_ret, captured (inside environment) return continuations
+/// - nonlocal_ret, captured (inside environment) return continuations inside the procedure (making them nonlocal)
+priv axm anno.(absclos, captured_ret, nonlocal_ret): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II
 priv anx nom Env = [];

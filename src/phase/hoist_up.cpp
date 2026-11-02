@@ -14,8 +14,24 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     auto fvset       = fvana_.free_vars(lam);
     auto fvs         = DefVec{fvset.begin(), fvset.end()};
-    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: only true for telescopes
+    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: this is a bad idea, it should not depend on the gid's
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
+
+    // post processing of the free vars / environment
+    for (size_t i = 0; i < fvs.size(); i++) {
+        // peel up var in environment if it contains a return continuation to annotate it.
+        if (auto v = fvs[i]->isa<Var>(); Pi::isa_returning(v->binder()->type())) {
+            auto n = environment[i]->num_projs();
+            auto env = environment[i];
+            environment[i] = w.tuple(DefVec{n, [&](auto i){
+                auto envp = env->proj(n, i);
+                return i != n -1 ? envp : annotate(envp, anno::captured_ret);
+            }});
+        }
+    }
+
+    // TODO: I have to detect captured return continuations and annotate them
+    // TODO: I also have to make sure that the mem state is always put in as a direct argument and not captured.
 
     log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
 
@@ -23,7 +39,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
         log().d("reuse {} ~> {}", lam, it->second);
-        return annotate(w.app(it->second, environment), anno::closure);
+        return annotate(w.app(it->second, environment), anno::absclos);
     }
 
     // create pi for outer lambda
@@ -108,7 +124,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     if (!outer_lam->type()->is_closed())
         outer_lam->blame("outer_lam's type is not closed, has free vars {}", outer_lam->type()->free_vars()).bail();
 
-    return annotate(w.app(outer_lam, environment), anno::closure);
+    return annotate(w.app(outer_lam, environment), anno::absclos);
 }
 
 void HoistUp::finalize() {
