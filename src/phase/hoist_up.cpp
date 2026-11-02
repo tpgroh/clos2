@@ -10,13 +10,13 @@ using namespace mim::plug;
 using namespace mim::plug::clos2;
 
 // annotate a 'abstract' closure for later phases
-const Def* annotate(const Def* def, anno a) {
+static const Def* annotate(const Def* def, anno a) {
     auto& w = def->world();
     return w.call(a, def);
 }
 
 // post processing of the free vars / environment
-static const DefVec annotate_environment (DefVec environment) {
+static DefVec annotate_environment (DefVec environment) {
     if (environment.size() == 0) return environment;
 
     auto& w = environment[0]->world();
@@ -61,11 +61,9 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we want to reuse the procedure (outerlam) if it was already created.
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
-        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(environment);
+        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(environment); // annotate only for non self recursive calls
         return annotate(w.app(it->second, environment), anno::absclos);
     }
-
-    environment = annotate_environment(environment);
 
     // create pi for outer lambda
     auto outer_pi = w.mut_pi(w.type_pending(), false);
@@ -149,7 +147,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     if (!outer_lam->type()->is_closed())
         outer_lam->blame("outer_lam's type is not closed, has free vars {}", outer_lam->type()->free_vars()).bail();
 
-    return annotate(w.app(outer_lam, environment), anno::absclos);
+    return annotate(w.app(outer_lam, annotate_environment(environment)), anno::absclos);
 }
 
 void HoistUp::finalize() {
