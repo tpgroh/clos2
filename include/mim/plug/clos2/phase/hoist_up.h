@@ -67,12 +67,6 @@ private:
         return false;
     }
 
-    // annotate a 'abstract' closure for later phases
-    const Def* annotate(const Def* def, anno a) {
-        auto& w = new_world();
-        return w.call(a, def);
-    }
-
     bool should_hoist(const Lam* lam) {
         if (lam->is_external()) return false; // we dont touch externals
         if (!pos_.contains(lam)) lam->blame("this lam was not analyzed").bail();

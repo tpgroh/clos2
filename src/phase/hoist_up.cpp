@@ -9,6 +9,41 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
+// annotate a 'abstract' closure for later phases
+const Def* annotate(const Def* def, anno a) {
+    auto& w = def->world();
+    return w.call(a, def);
+}
+
+// post processing of the free vars / environment
+static const DefVec annotate_environment (DefVec environment) {
+    if (environment.size() == 0) return environment;
+
+    auto& w = environment[0]->world();
+
+    for (size_t i = 0; i < environment.size(); i++) {
+        auto n = environment[i]->num_projs();
+        auto env = environment[i];
+
+        // peel up var in environment if it contains a return continuation to annotate it.
+        if (auto v = env->isa<Extract>() ? EXAnalysis::getVarOfExt(env->isa<Extract>()) : env->isa<Var>();
+            v && Pi::isa_returning(v->binder()->type()) && (env == v || env == v->proj(n, n-1))) {
+            environment[i] = w.tuple(DefVec{n, [&](auto i){
+                auto envp = env->proj(n, i);
+                return i != n -1 ? envp : annotate(envp, anno::captured_ret);
+            }});
+        }
+
+        // TODO: later we might also want to remove/ make sure that we did not capture any mem.M typed things.
+        // but I think that no harm is done here leaving it here wrong. it will be fixed by mem.add_mem (I hope)
+        // in any case capturing the memory state is almost always wrong, because we want to work with the current state and not the one at creation.
+        // also note that as soon (also depending on how) linear types are in MimIR capturing would be wrong in every case.
+        // so it might actually make sense to already replace them with mem.fresh ?
+    }
+
+    return environment;
+}
+
 const Def* HoistUp::hoistUp(const Lam* lam) {
     auto& w = new_world();
 
@@ -17,30 +52,16 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: this is a bad idea, it should not depend on the gid's
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
-    // post processing of the free vars / environment
-    for (size_t i = 0; i < fvs.size(); i++) {
-        // peel up var in environment if it contains a return continuation to annotate it.
-        if (auto v = fvs[i]->isa<Var>(); v && Pi::isa_returning(v->binder()->type())) {
-            auto n = environment[i]->num_projs();
-            auto env = environment[i];
-            environment[i] = w.tuple(DefVec{n, [&](auto i){
-                auto envp = env->proj(n, i);
-                return i != n -1 ? envp : annotate(envp, anno::captured_ret);
-            }});
-        }
-    }
-
-    // TODO: I have to detect captured return continuations and annotate them
-    // TODO: I also have to make sure that the mem state is always put in as a direct argument and not captured.
-
     log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
 
     // we want to reuse the procedure (outerlam) if it was already created.
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
-        log().d("reuse {} ~> {}", lam, it->second);
+        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(environment);
         return annotate(w.app(it->second, environment), anno::absclos);
     }
+
+    environment = annotate_environment(environment);
 
     // create pi for outer lambda
     auto outer_pi = w.mut_pi(w.type_pending(), false);
