@@ -21,6 +21,7 @@ static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
     auto& w = fvs[0]->world();
 
     // un peel var in environment if it contains a return continuation to annotate it.
+    // TODO: this way we get extractions of var into the environment that where already there but not used.
     for (size_t i = 0; i < fvs.size(); i++) {
         auto f = fvs[i];
         auto nf = environment[i];

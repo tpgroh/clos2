@@ -10,6 +10,7 @@
 ///
 plugin core;
 import compile;
+import mem;
 ///
 /// ## Operations
 ///
@@ -30,10 +31,23 @@ axm hoist_up: compile.Phase;
 /// In the target world this "closure" is then marked as such using the following wrapper which's normalizer always rejects
 /// - absclos, abstract closure
 /// - captured_ret, captured (inside environment) return continuations
-/// - nonlocal_ret, captured (inside environment) return continuations inside the procedure (making them nonlocal)
+/// - nonlocal_ret, captured (inside environment) return continuations inside the procedure (making them nonlocal) TODO: this is currently not used
 priv axm anno.(absclos, captured_ret, nonlocal_ret): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II
+axm absclos_to_sjlj: compile.Phase;
+/// This phase is rewriting captured return continuations to a setjump + longjump structure
+
+/// We do not know the size of jmp_buf, thus we have to keep it, pointers to it and its allocation abstract for the backend (which knows the actual size)
+/// TODO : add documentation on why/what these are (idealy after I fine tuned them to work)
+anx nom JmpBuf = [];
+anx let JmpBufPtr = mem.Ptr0 JmpBuf;
+axm alloc_jmpbuf: mem.M 0 → [mem.M 0, JmpBufPtr];
+anx lam RetCont (T: *): * = [JmpBufPtr, mem.Ptr0 T];
+axm setjmp: [mem.M 0, JmpBufPtr] → [mem.M 0, I32];
+axm longjmp: Cn [mem.M 0, JmpBufPtr, I32];
+
+/// ### Phase III
 priv anx nom Env = [];
 priv axm unsafe_cast: {S: *} → [D: *] → S → D;
 axm absclos_elim: compile.Phase;

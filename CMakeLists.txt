@@ -9,8 +9,9 @@ add_mim_plugin(clos2
     SOURCES
         src/clos2.cpp
         src/normalizers.cpp
-        src/phase/absclos_elim.cpp
         src/phase/hoist_up.cpp
+        src/phase/absclos_to_sjlj.cpp
+        src/phase/absclos_elim.cpp
 )
 
 if(MIM_BUILD_EXAMPLES)
