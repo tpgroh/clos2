@@ -16,25 +16,26 @@ static const Def* annotate(const Def* def, anno a) {
 }
 
 // post processing of the free vars / environment
-static DefVec annotate_environment (DefVec environment) {
-    if (environment.size() == 0) return environment;
+static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
+    if (fvs.size() == 0) return environment;
+    auto& w = fvs[0]->world();
 
-    auto& w = environment[0]->world();
-
-    for (size_t i = 0; i < environment.size(); i++) {
-        auto env = environment[i];
-
-        // un peel var in environment if it contains a return continuation to annotate it.
-        auto v = env->isa<Extract>() ? EXAnalysis::getVarOfExt(env->isa<Extract>()) : env->as<Var>();
+    // un peel var in environment if it contains a return continuation to annotate it.
+    for (size_t i = 0; i < fvs.size(); i++) {
+        auto f = fvs[i];
+        auto nf = environment[i];
+        auto v = f->isa<Extract>() ? EXAnalysis::getVarOfExt(f->isa<Extract>()) : f->as<Var>();
+        assert(v && "The used free var analysis should only collect vars and extracts of vars");
         auto n = v->num_projs();
         if (Pi::isa_returning(v->binder()->type())) {
-            if (env == v) {
+            if (f == v) { // we have collected the entire var, thus we unpeel
+                assert(nf->num_projs() == n && "the environments arity should not have changed!");
                 environment[i] = w.tuple(DefVec{n, [&](auto i){
-                    auto envp = env->proj(n, i);
+                    auto envp = nf->proj(n, i);
                     return i != n -1 ? envp : annotate(envp, anno::captured_ret);
                 }});
-            } else if (env == v->proj(v->num_projs(), n-1)) {
-                environment[i] = annotate(env, anno::captured_ret);
+            } else if (f == v->proj(n, n-1)) { // we have collected only the return continuation
+                environment[i] = annotate(nf, anno::captured_ret);
             }
         }
         
@@ -61,7 +62,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we want to reuse the procedure (outerlam) if it was already created.
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
-        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(environment); // annotate only for non self recursive calls
+        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(fvs, environment); // annotate only for non self recursive calls
         return annotate(w.app(it->second, environment), anno::absclos);
     }
 
@@ -147,7 +148,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     if (!outer_lam->type()->is_closed())
         outer_lam->blame("outer_lam's type is not closed, has free vars {}", outer_lam->type()->free_vars()).bail();
 
-    return annotate(w.app(outer_lam, annotate_environment(environment)), anno::absclos);
+    return annotate(w.app(outer_lam, annotate_environment(fvs, environment)), anno::absclos);
 }
 
 void HoistUp::finalize() {
