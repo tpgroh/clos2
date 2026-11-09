@@ -20,5 +20,6 @@ extern lam _compile(): compile.Phase =
         compile.eta_conv,
 
         compile.named "clos2.hoist_up",
-        compile.named "clos2.absclos_elim",
+        compile.named "clos2.absclos_to_sjlj",
+        //compile.named "clos2.absclos_elim",
     );
