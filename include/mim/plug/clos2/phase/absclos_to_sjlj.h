@@ -38,14 +38,16 @@ private:
 
         // if we find a captured return continuation annotation we store the binder
         if (auto ano = Axm::isa(anno::captured_ret, def)) {
-            auto cr = ano->arg();
+            auto v = ano->arg();
 
             // get the var from the return continuation
             const Var* var = nullptr;
-            if (auto ext = cr->isa<Extract>()) var = ext->tuple()->isa<Var>();
-            else                               var = cr->isa<Var>();
+            if (auto ext = v->isa<Extract>()) var = ext->tuple()->isa<Var>();
+            else                              var = v->isa<Var>();
 
-            if (var) allocsites_.emplace(var->binder());
+            if (var)
+                if (auto lam = var->binder()->as<Lam>(); lam && lam->ret_var() == v)
+                    allocsites_.emplace(var->binder());
         }
 
         // recursive graph traversal
