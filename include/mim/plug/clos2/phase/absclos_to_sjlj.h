@@ -65,7 +65,8 @@ private:
     }
 
     const Def* rewrite_body2setjmp(Lam*);
-    const Def* rewrite_envtype(Def*);
+    const Def* rewrite_hoist(Lam*, fe::Vector<nat_t>&);
+    const Def* rewrite_environment(const Def*, fe::Vector<nat_t>&);
 
     const Def* rewrite_mut_Lam(Lam* mut) {
         if (allocsites_.contains(mut)) return rewrite_body2setjmp(mut);
@@ -73,15 +74,28 @@ private:
     }
 
     const Def* rewrite_imm_App(const App* app) {
-        if (auto ano = Axm::isa(anno::absclos)) {
+        auto& w = new_world();
+
+        if (auto ano = Axm::isa(anno::captured_ret, app)) {
+            auto cr = ano->arg();
+            return w.call(anno::captured_ret, rewrite(cr));
+        }
+
+        if (auto ano = Axm::isa(anno::absclos, app)) {
             auto clos = ano->arg()->isa<App>();
             assert(clos && "abclos could also be applied to something else than App");
-            auto old_proc = clos->callee();
+            auto old_proc = clos->callee()->as_mut<Lam>();
             auto old_env =  clos->arg();
 
-            // TODO : rewrite the procedure and the environment.
+            // rewrite the procedure and the environment.
             // then just reconstruct the anotation of the closure from scratch
-            // this way I dont have to rewrite the implicit type argument to the annotater
+            // this way I dont have to rewrite the implicit type argument to the annotation
+
+            fe::Vector<nat_t>idx;
+            auto env  = rewrite_environment(old_env, idx);
+            auto proc = rewrite_hoist(old_proc, idx);
+
+            return w.call(anno::absclos, w.app(proc, env));
         }
 
         return RWPhase::rewrite_imm_App(app);
