@@ -65,10 +65,26 @@ private:
     }
 
     const Def* rewrite_body2setjmp(Lam*);
+    const Def* rewrite_envtype(Def*);
 
     const Def* rewrite_mut_Lam(Lam* mut) {
         if (allocsites_.contains(mut)) return rewrite_body2setjmp(mut);
         return RWPhase::rewrite_mut_Lam(mut);
+    }
+
+    const Def* rewrite_imm_App(const App* app) {
+        if (auto ano = Axm::isa(anno::absclos)) {
+            auto clos = ano->arg()->isa<App>();
+            assert(clos && "abclos could also be applied to something else than App");
+            auto old_proc = clos->callee();
+            auto old_env =  clos->arg();
+
+            // TODO : rewrite the procedure and the environment.
+            // then just reconstruct the anotation of the closure from scratch
+            // this way I dont have to rewrite the implicit type argument to the annotater
+        }
+
+        return RWPhase::rewrite_imm_App(app);
     }
 
 private:

@@ -20,7 +20,7 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
 
     push();
     bind_old(old_lam->has_var());
-    bind_old(new_lam->var()->isa<Var>());
+    bind_new(new_lam->var()->isa<Var>());
 
     log().d("test1");
 
