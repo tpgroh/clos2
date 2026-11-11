@@ -76,8 +76,55 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     return new_lam;
 }
 
+
+const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, size_t &idx_i, fe::Vector<nat_t>& idx) {
+    auto& w = new_world();
+
+    if (idx[idx_i] != i) return rewrite(old_op);
+    idx_i++;
+
+    auto cn = Pi::isa_cn(old_op);
+    assert(cn && "return continuations in hoistup env param should have type Cn");
+
+    auto old_rettype = cn->dom();
+    auto new_rettype = core::strip_mem_ty(rewrite(old_rettype));
+
+    if (new_rettype == w.sigma()) return w.annex<JmpBufPtr>();
+
+    return w.sigma({w.call<mem::Ptr0>(new_rettype), w.annex<JmpBufPtr>()});
+}
+
 const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
+    auto& w = new_world();
+    auto dom = old_proc->dom();
+    auto n = old_proc->num_doms();
+
     log().d("rewrite hoist {} with idx {}", old_proc, idx);
+
+    // TODO handle case n == 1
+
+    // rebuild the environment sigma
+    if (auto tel = dom->isa_mut<Sigma>()) {
+        auto new_sig = w.mut_sigma(rewrite(tel->type()), n);
+        push();
+        bind_old(tel->has_var());
+        bind_new(new_sig->var()->isa<Var>());
+        if (auto v = tel->has_var()) map(v, new_sig->var());
+        size_t idx_i = 0;
+        for (size_t i = 0; i < n; i++)
+            new_sig->set(i, rewrite_hoist_capretcon(i, tel->op(i), idx_i, idx));
+        pop();
+        log().d("rewrote {}", tel);
+        log().d("to      {}", new_sig);
+    } else {
+        auto old_sig = dom->isa<Sigma>();
+        assert(old_sig && "the domain of a procedure should be a sigma");
+        size_t idx_i = 0;
+        auto new_sig = w.sigma(DefVec{n, [&](auto i){ return rewrite_hoist_capretcon(i, old_sig->op(i), idx_i, idx); }});
+        log().d("rewrote {}", old_sig);
+        log().d("to      {}", new_sig);
+    }
+
     assert(0 && "ok");
     return nullptr;
 }

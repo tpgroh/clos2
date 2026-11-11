@@ -66,6 +66,7 @@ private:
 
     const Def* rewrite_body2setjmp(Lam*);
     const Def* rewrite_hoist(Lam*, fe::Vector<nat_t>&);
+    const Def* rewrite_hoist_capretcon(size_t i, const Def*, size_t&, fe::Vector<nat_t>&);
     const Def* rewrite_environment(const Def*, fe::Vector<nat_t>&);
 
     const Def* rewrite_mut_Lam(Lam* mut) {
