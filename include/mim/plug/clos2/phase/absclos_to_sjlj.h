@@ -79,14 +79,17 @@ private:
 
         if (auto ano = Axm::isa(anno::captured_ret, app)) {
             auto cr = ano->arg();
-            auto new_retcon = retcons_[cr];
-            assert(new_retcon && "captured return continuations should already be rewritten");
+            auto it = retcons_.find(cr);
+            if (it == retcons_.end())
+                cr->blame("captured return continuations should already be rewritten").bail();
+
+            auto new_retcon = it->second;
             return w.call(anno::captured_ret, new_retcon);
         }
 
         if (auto ano = Axm::isa(anno::absclos, app)) {
             auto clos = ano->arg()->isa<App>();
-            assert(clos && "abclos could also be applied to something else than App");
+            if (!clos) return RWPhase::rewrite_imm_App(app);
             auto old_proc = clos->callee()->as_mut<Lam>();
             auto old_env =  clos->arg();
 
