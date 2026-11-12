@@ -38,6 +38,7 @@ private:
 
         // if we find a captured return continuation annotation we store the binder
         if (auto ano = Axm::isa(anno::captured_ret, def)) {
+            found_captured_ret_ = true;
             auto v = ano->arg();
 
             // get the var from the return continuation
@@ -64,6 +65,13 @@ private:
         return false;
     }
 
+    void start() final {
+        DefSet done{};
+        for (auto root : old_world().externals().muts()) analyze(root, done);
+        if (!found_captured_ret_) return;
+        RWPhase::start();
+    }
+
     const Def* rewrite_body2setjmp(Lam*);
     const Def* rewrite_hoist(Lam*, fe::Vector<nat_t>&);
     const Def* rewrite_hoist_capretcon(size_t i, const Def*, size_t&, fe::Vector<nat_t>&);
@@ -83,8 +91,8 @@ private:
             if (it == retcons_.end())
                 cr->blame("captured return continuations should already be rewritten").bail();
 
-            auto new_retcon = it->second;
-            return w.call(anno::captured_ret, new_retcon);
+            return it->second; // this annotation was only for this phase
+            // TODO return w.call(anno::captured_ret, it->second);
         }
 
         if (auto ano = Axm::isa(anno::absclos, app)) {
@@ -108,6 +116,7 @@ private:
     }
 
 private:
+    bool found_captured_ret_ = false;
     DefSet allocsites_{};
     Def2Def retcons_{};
 };
