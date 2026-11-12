@@ -96,15 +96,16 @@ const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, siz
 
 const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     auto& w = new_world();
-    auto dom = old_proc->dom();
+    auto old_dom = old_proc->dom();
     auto n = old_proc->num_doms();
 
     log().d("rewrite hoist {} with idx {}", old_proc, idx);
 
+    const Def* new_dom = nullptr;
     // TODO handle case n == 1
 
     // rebuild the environment sigma
-    if (auto tel = dom->isa_mut<Sigma>()) {
+    if (auto tel = old_dom->isa_mut<Sigma>()) {
         auto new_sig = w.mut_sigma(rewrite(tel->type()), n);
         push();
         bind_old(tel->has_var());
@@ -114,16 +115,44 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
         for (size_t i = 0; i < n; i++)
             new_sig->set(i, rewrite_hoist_capretcon(i, tel->op(i), idx_i, idx));
         pop();
-        log().d("rewrote {}", tel);
-        log().d("to      {}", new_sig);
+        new_dom = new_sig;
     } else {
-        auto old_sig = dom->isa<Sigma>();
+        auto old_sig = old_dom->isa<Sigma>();
         assert(old_sig && "the domain of a procedure should be a sigma");
         size_t idx_i = 0;
         auto new_sig = w.sigma(DefVec{n, [&](auto i){ return rewrite_hoist_capretcon(i, old_sig->op(i), idx_i, idx); }});
-        log().d("rewrote {}", old_sig);
-        log().d("to      {}", new_sig);
+        new_dom = new_sig;
     }
+        
+    log().d("rewrote {}", old_dom);
+    log().d("to      {}", new_dom);
+
+    // rewrite pi type of the procedure
+    auto old_pi = old_proc->type()->as<Pi>();
+    auto new_pi = w.mut_pi(rewrite(old_pi->type()));
+
+    // note that the codom should not have depended on the things we just modified in the domain
+    push();
+    bind_old(old_pi->has_var());
+    bind_new(new_pi->var()->as<Var>());
+    new_pi->set_dom(new_dom);
+    if (auto v = old_pi->has_var()) map(v, new_pi->var());
+    new_pi->set_codom(rewrite(old_pi->codom()));
+    pop();
+
+    log().d("rewrote {}", old_pi);
+    log().d("to      {}", new_pi);
+
+    // now recreate the hoisted procedure
+    auto new_proc = w.mut_lam(new_pi);
+
+    push();
+    bind_old(old_proc->has_var());
+    bind_new(new_proc->var()->as<Var>());
+    if (auto v = old_proc->has_var()) map(v, new_proc->var());
+    // TODO: I have to rewrite usage of the return continuation to store + longjmp (jmpbuf)
+    new_proc->set(rewrite(old_proc->filter()), rewrite(old_proc->body()));
+    pop();
 
     assert(0 && "ok");
     return nullptr;
