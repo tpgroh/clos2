@@ -79,7 +79,9 @@ private:
 
         if (auto ano = Axm::isa(anno::captured_ret, app)) {
             auto cr = ano->arg();
-            return w.call(anno::captured_ret, rewrite(cr));
+            auto new_retcon = retcons_[cr];
+            assert(new_retcon && "captured return continuations should already be rewritten");
+            return w.call(anno::captured_ret, new_retcon);
         }
 
         if (auto ano = Axm::isa(anno::absclos, app)) {
@@ -104,6 +106,7 @@ private:
 
 private:
     DefSet allocsites_{};
+    Def2Def retcons_{};
 };
 
 }

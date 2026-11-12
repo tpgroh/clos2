@@ -51,7 +51,7 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     // create the return body
     auto return_body = w.mut_con(w.sigma());
     if (skip_ret_pointer)
-        return_body->set(true, w.call(new_lam->ret_var(), new_m));
+        return_body->set(true, w.app(new_lam->ret_var(), new_m));
     else {
         auto [ret_new_m, ret_value] = w.call<mem::load>(Defs{new_m, ret_ptr})->projs<2>();
         auto ret_actual_value = Prod::cat(true, 1, ret_value->num_projs(), ret_new_m, ret_value);
@@ -60,7 +60,8 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     
     // create the actual body
     map(mem::mem_var(old_lam), new_m);
-    map(old_lam->ret_var(), w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr}));
+    // TODO map(old_lam->ret_var(), w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr}));
+    retcons_[old_lam->ret_var()] = w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr});
 
     auto body = w.mut_con(w.sigma());
     body->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
@@ -94,7 +95,11 @@ const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, siz
     return w.sigma({w.call<mem::Ptr0>(new_rettype), w.annex<JmpBufPtr>()});
 }
 
+// TODO: I have to think about how to handle this for self recursive lambdas.
+// those dont get repackaged, I think.
 const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
+    if (auto new_def = lookup(old_proc)) return new_def;
+
     auto& w = new_world();
     auto old_dom = old_proc->dom();
     auto n = old_proc->num_doms();
@@ -149,6 +154,33 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     push();
     bind_old(old_proc->has_var());
     bind_new(new_proc->var()->as<Var>());
+
+    // rewrite captured return continuation usages
+    for (auto i : idx) {
+        auto v = new_proc->var(new_proc->num_vars(), i);
+        auto old_retcon = old_proc->var(old_proc->num_vars(), i);
+        retcons_[old_retcon] = v;
+        auto old_type = old_retcon->type()->as<Pi>();
+        auto new_type = rewrite(old_type)->as<Pi>();
+        auto retcon_wrapper = w.mut_lam(new_type);
+        if (old_type->num_doms() <= 1) {
+            assert(old_type->dom()->num_projs() == 1 && "the return continuation should at least take a memory effect thing");
+
+            // in this case I expect the packed return continuation replacement to be just the jmp_buf.
+            auto m = retcon_wrapper->var();
+            retcon_wrapper->set(true, w.call<longjmp>(m, v, w.lit_i32(1)));
+        } else {
+            auto m1 = core::mem_var(retcon_wrapper);
+            auto n = retcon_wrapper->num_doms();
+            auto ret = w.tuple(DefVec{n -1, [&](auto j){ return retcon_wrapper->var(n, j+1);}});
+            auto [ptr, jmpbuf] = v->projs<2>();
+            auto m2 = w.call<mem::store>(m1, ptr, ret);
+            retcon_wrapper->set(true, w.call<longjmp>(m2, jmpbuf, w.lit_i32(1)));
+        }
+
+        map(old_retcon, retcon_wrapper);
+    }
+
     if (auto v = old_proc->has_var()) map(v, new_proc->var());
     // TODO: I have to rewrite usage of the return continuation to store + longjmp (jmpbuf)
     new_proc->set(rewrite(old_proc->filter()), rewrite(old_proc->body()));
