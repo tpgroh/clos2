@@ -100,6 +100,10 @@ const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, siz
 const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     if (auto new_def = lookup(old_proc)) return new_def;
 
+    // if idx is empty this procedure does not capture any return continuations
+    // this includes the case: empty environment
+    if (idx.empty()) return RWPhase::rewrite_mut_Lam(old_proc);
+
     auto& w = new_world();
     auto old_dom = old_proc->dom();
     auto n = old_proc->num_doms();
@@ -110,7 +114,10 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     // TODO handle case n == 1
 
     // rebuild the environment sigma
-    if (auto tel = old_dom->isa_mut<Sigma>()) {
+    if (n == 1) {
+        size_t idx_i = 0;
+        new_dom = rewrite_hoist_capretcon(0, old_dom, idx_i, idx);
+    } else if (auto tel = old_dom->isa_mut<Sigma>()) {
         auto new_sig = w.mut_sigma(rewrite(tel->type()), n);
         push();
         bind_old(tel->has_var());

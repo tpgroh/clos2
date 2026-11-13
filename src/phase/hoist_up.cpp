@@ -31,7 +31,7 @@ static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
         if (Pi::isa_returning(v->binder()->type())) {
             if (f == v) { // we have collected the entire var, thus we unpeel
                 assert(nf->num_projs() == n && "the environments arity should not have changed!");
-                environment[i] = w.tuple(DefVec{n, [&](auto i){
+                environment[i] = environment[0]->world().tuple(DefVec{n, [&](auto i){
                     auto envp = nf->proj(n, i);
                     return i != n -1 ? envp : annotate(envp, anno::captured_ret);
                 }});
