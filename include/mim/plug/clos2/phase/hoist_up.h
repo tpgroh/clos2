@@ -118,8 +118,13 @@ private:
 
 private:
     struct Stub {
+        struct Expanded{
+            const Var* var;
+            size_t first, n;
+        };
         const Lam* lam;
-        const DefVec fvs; // I could loose this if I use a deterministic sorting of free vars. (currently it should be)
+        const DefVec fvs;
+        const fe::Vector<Expanded> expanded;
     };
     std::queue<Stub> worklist_ = {};
     DefMap<Lam*> outerlams_    = {};

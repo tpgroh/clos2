@@ -20,31 +20,19 @@ static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
     if (fvs.size() == 0) return environment;
     auto& w = fvs[0]->world();
 
-    // un peel var in environment if it contains a return continuation to annotate it.
-    // TODO: this way we get extractions of var into the environment that where already there but not used.
     for (size_t i = 0; i < fvs.size(); i++) {
         auto f = fvs[i];
         auto nf = environment[i];
         auto v = f->isa<Extract>() ? EXAnalysis::getVarOfExt(f->isa<Extract>()) : f->as<Var>();
         assert(v && "The used free var analysis should only collect vars and extracts of vars");
         auto n = v->num_projs();
-        if (Pi::isa_returning(v->binder()->type())) {
-            if (f == v) { // we have collected the entire var, thus we unpeel
-                assert(nf->num_projs() == n && "the environments arity should not have changed!");
-                environment[i] = environment[0]->world().tuple(DefVec{n, [&](auto i){
-                    auto envp = nf->proj(n, i);
-                    return i != n -1 ? envp : annotate(envp, anno::captured_ret);
-                }});
-            } else if (f == v->proj(n, n-1)) { // we have collected only the return continuation
-                environment[i] = annotate(nf, anno::captured_ret);
-            }
+
+        // detect return continuations and annotate them as captured return continuation.
+        // note that the only captured return continuations that can be captured are already
+        // in their own slot in the environment. hoistup unpeel Var if needed to achive this.
+        if (Pi::isa_returning(v->binder()->type()) && f == v->proj(n, n-1)) {
+            environment[i] = annotate(nf, anno::captured_ret);
         }
-        
-        // TODO: later we might also want to remove/ make sure that we did not capture any mem.M typed things.
-        // but I think that no harm is done here leaving it here wrong. it will be fixed by mem.add_mem (I hope)
-        // in any case capturing the memory state is almost always wrong, because we want to work with the current state and not the one at creation.
-        // also note that as soon (also depending on how) linear types are in MimIR capturing would be wrong in every case.
-        // so it might actually make sense to already replace them with mem.fresh ?
     }
 
     return environment;
@@ -55,7 +43,24 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
 
     auto fvset       = fvana_.free_vars(lam);
     auto fvs         = DefVec{fvset.begin(), fvset.end()};
-    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: this is a bad idea, it should not depend on the gid's
+    // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: this is a bad idea, it should not depend on the gid's
+    std::ranges::sort(fvs, GIDLt<const Def*>());
+
+    auto expansions = fe::Vector<Stub::Expanded>{};
+    { // unpeel variables if it has a return continuation.
+    auto expanded_fvs = DefVec{};
+    for (auto f : fvs) {
+        if (auto v = f->isa<Var>(); v && Lam::isa_mut_returning(v->binder()) && v->num_projs() > 1) {
+            auto n = v->num_projs();
+            expansions.emplace_back(v, expanded_fvs.size(), n);
+            for (size_t i = 0; i < n; i++)
+                expanded_fvs.emplace_back(v->proj(n, i));
+        } else
+            expanded_fvs.emplace_back(f);
+    }
+    fvs = std::move(expanded_fvs);
+    }
+
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
     log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
@@ -140,7 +145,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we perform the rewrite of the body after the map/lookup scope of the free vars was destroyed.
     // the rewrite is being done in finalize. thus we have to add {lam, fvs} to the worklist.
     // the actual new lam can be obtained there by the outerlams_ map.
-    worklist_.emplace(lam, fvs);
+    worklist_.emplace(lam, fvs, std::move(expansions));
     outerlams_[lam] = outer_lam;
 
     log().d("hoistup {} ~> {}:{} with free vars {}", lam, outer_lam, outer_lam->type(), outer_lam->free_vars());
@@ -157,8 +162,10 @@ void HoistUp::finalize() {
         auto stub = worklist_.front();
         worklist_.pop();
 
+        auto& w = new_world();
         const auto& lam = stub.lam;
         const auto& fvs = stub.fvs;
+        const auto& exps = stub.expanded;
 
         const auto outer_lam = outerlams_.at(lam);
         const auto inner_lam = outer_lam->body()->as_mut<Lam>();
@@ -176,18 +183,35 @@ void HoistUp::finalize() {
         env->set("env");
 
         if (fvs.size() == 1) {
+            assert(exps.size() == 0);
             env->set(fvs[0]->sym());
             map(fvs[0], env);
             log().d("mapping {} to {}", fvs[0], env);
         } else {
             assert(env->num_projs() == fvs.size() && "env and fvs should agree on their arity");
+            auto it = exps.begin();
             for (size_t i = 0; i < fvs.size(); i++) {
+                if (it != exps.end() && it->first == i) {
+                    auto f = it->var;
+                    auto e = w.tuple(DefVec{it->n, [&](auto j){
+                        auto e = env->proj(fvs.size(), i + j);
+                        e->set(fvs[i]->sym());
+                        return e;
+                    }});
+                    map(f, e);
+                    log().d("mapping {} to {}", f, e);
+                    i += it->n -1;
+                    continue;
+                }
                 auto f = fvs[i];
                 auto e = env->proj(fvs.size(), i);
                 e->set(f->sym());
                 map(f, e);
                 log().d("mapping {} to {}", f, e);
             }
+        }
+
+        for (auto e : exps) {
         }
 
         if (auto v = lam->has_var()) {
