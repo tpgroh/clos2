@@ -3,6 +3,7 @@
 #include "mim/def.h"
 #include "mim/phase.h"
 #include "mim/plug/clos2/autogen.h"
+#include <set>
 
 namespace mim::plug::clos2 {
 
@@ -51,6 +52,25 @@ private:
                     allocsites_.emplace(var->binder());
         }
 
+        // find the indices in environment parameters of procedures where captured return continuations are.
+        // this cannot get annotated inside the type of the procedure. thus we have to find it out here
+        else if (auto ano = Axm::isa(anno::absclos, def))
+            if (auto clos = ano->arg()->isa<App>()) { // if not self recursive call
+                auto old_proc = clos->callee()->as_mut<Lam>();
+                auto old_env =  clos->arg();
+
+                if (old_env->num_projs() <= 1) {
+                    // for single element environment 0 means the entire environment, not the first projection
+                    if (auto ano = Axm::isa(anno::captured_ret, old_env))
+                        retslots_[old_proc].emplace(0);
+                } else {
+                    auto n = old_env->num_projs();
+                    for (size_t i = 0; i < n; i++)
+                        if (auto ano = Axm::isa(anno::captured_ret, old_env->proj(n, i)))
+                            retslots_[old_proc].emplace(i);
+                }
+            }
+
         // recursive graph traversal
         for (auto d : def->deps()) analyze(d, done);
     }
@@ -73,9 +93,8 @@ private:
     }
 
     const Def* rewrite_body2setjmp(Lam*);
-    const Def* rewrite_hoist(Lam*, fe::Vector<nat_t>&);
+    const Def* rewrite_hoist(Lam*);
     const Def* rewrite_hoist_capretcon(size_t i, const Def*, size_t&, fe::Vector<nat_t>&);
-    const Def* rewrite_environment(const Def*, fe::Vector<nat_t>&);
 
     const Def* rewrite_mut_Lam(Lam* mut) {
         if (allocsites_.contains(mut)) return rewrite_body2setjmp(mut);
@@ -97,17 +116,12 @@ private:
 
         if (auto ano = Axm::isa(anno::absclos, app)) {
             auto clos = ano->arg()->isa<App>();
-            if (!clos) return RWPhase::rewrite_imm_App(app);
+            if (!clos) return RWPhase::rewrite_imm_App(app); // if procedure is self recursive call
             auto old_proc = clos->callee()->as_mut<Lam>();
             auto old_env =  clos->arg();
 
-            // rewrite the procedure and the environment.
-            // then just reconstruct the anotation of the closure from scratch
-            // this way I dont have to rewrite the implicit type argument to the annotation
-
-            fe::Vector<nat_t>idx;
-            auto env  = rewrite_environment(old_env, idx);
-            auto proc = rewrite_hoist(old_proc, idx);
+            auto env  = rewrite(old_env);
+            auto proc = rewrite_hoist(old_proc);
 
             return w.call(anno::absclos, w.app(proc, env));
         }
@@ -119,6 +133,7 @@ private:
     bool found_captured_ret_ = false;
     DefSet allocsites_{};
     Def2Def retcons_{};
+    GIDNodeMap<const Def*, std::set<nat_t>> retslots_{};
 };
 
 }

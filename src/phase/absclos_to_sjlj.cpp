@@ -97,18 +97,22 @@ const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, siz
 
 // TODO: I have to think about how to handle this for self recursive lambdas.
 // those dont get repackaged, I think.
-const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
+const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc) {
     if (auto new_def = lookup(old_proc)) return new_def;
 
     // if idx is empty this procedure does not capture any return continuations
     // this includes the case: empty environment
-    if (idx.empty()) return RWPhase::rewrite_mut_Lam(old_proc);
+    if (retslots_.find(old_proc) == retslots_.end())
+        return RWPhase::rewrite_mut_Lam(old_proc);
 
     auto& w = new_world();
     auto old_dom = old_proc->dom();
     auto n = old_proc->num_doms();
 
-    log().d("rewrite hoist {} with idx {}", old_proc, idx);
+    log().d("rewrite hoist {} with idx {}", old_proc, retslots_[old_proc]);
+
+    // TODO: I want to get rid of the vector.
+    auto idx = fe::Vector<nat_t>{retslots_[old_proc].begin(), retslots_[old_proc].end()};
 
     const Def* new_dom = nullptr;
 
@@ -191,33 +195,3 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
 
     return new_proc;
 }
-
-const Def* AbsClosSjLj::rewrite_environment(const Def* old_env, fe::Vector<nat_t>& idx) {
-    log().d("rewrite environment {}", old_env);
-
-    auto n = old_env->num_projs();
-
-    if (n <= 1) {
-        if (Axm::isa(anno::captured_ret, old_env)) idx.push_back(0);
-    } else
-        for (size_t i = 0; i < n; i++)
-            if (Axm::isa(anno::captured_ret, old_env->proj(n, i))) idx.push_back(i);
-
-    return rewrite(old_env);
-    
-    // TODO: rewrite the environement
-    // for this I have to rewrite
-
-/*
-    auto& w = new_world();
-    auto n = old_env->num_projs();
-
-    // if the environment is a single thing it is not a tuple
-    if (n <= 1) return rewrite(old_env);
-
-    auto ops = rewrite(old_env->ops());
-    log().d("ops {}", ops);
-    return w.tuple(ops);
-*/
-}
-
