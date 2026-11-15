@@ -61,7 +61,7 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     // create the actual body
     map(mem::mem_var(old_lam), new_m);
     // TODO map(old_lam->ret_var(), w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr}));
-    retcons_[old_lam->ret_var()] = w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr});
+    retcons_[old_lam->ret_var()] = skip_ret_pointer ? jmp_buf : w.tuple(Defs{jmp_buf, ret_ptr});
 
     auto body = w.mut_con(w.sigma());
     body->set(rewrite(old_lam->filter()), rewrite(old_lam->body()));
@@ -111,7 +111,6 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     log().d("rewrite hoist {} with idx {}", old_proc, idx);
 
     const Def* new_dom = nullptr;
-    // TODO handle case n == 1
 
     // rebuild the environment sigma
     if (n == 1) {
@@ -136,9 +135,6 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
         new_dom = new_sig;
     }
         
-    log().d("rewrote {}", old_dom);
-    log().d("to      {}", new_dom);
-
     // rewrite pi type of the procedure
     auto old_pi = old_proc->type()->as<Pi>();
     auto new_pi = w.mut_pi(rewrite(old_pi->type()));
@@ -152,9 +148,6 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
     new_pi->set_codom(rewrite(old_pi->codom()));
     pop();
 
-    log().d("rewrote {}", old_pi);
-    log().d("to      {}", new_pi);
-
     // now recreate the hoisted procedure
     auto new_proc = w.mut_lam(new_pi);
 
@@ -166,22 +159,24 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc, fe::Vector<nat_t>& idx) {
 
     // rewrite captured return continuation usages
     for (auto i : idx) {
-        auto v = new_proc->var(new_proc->num_vars(), i);
-        auto old_retcon = old_proc->var(old_proc->num_vars(), i);
-        retcons_[old_retcon] = v;
+        // if old_proc->num_doms() > 1 then there is more than one thing in the environment
+        auto v = old_proc->num_doms() > 1 ? new_proc->var(new_proc->num_vars(), i) : new_proc->var();
+        auto old_retcon = old_proc->num_doms() > 1 ? old_proc->var(old_proc->num_vars(), i) : old_proc->var();
+        retcons_[old_retcon] = v; // create a mapping outside of the push/pop machinery
         auto old_type = old_retcon->type()->as<Pi>();
         auto new_type = rewrite(old_type)->as<Pi>();
         auto retcon_wrapper = w.mut_lam(new_type);
-        if (old_type->num_doms() <= 1) {
+        if (old_type->num_doms() <= 1) { // only mem.M as domain thus no payload buffer
             assert(old_type->dom()->num_projs() == 1 && "the return continuation should at least take a memory effect thing");
 
             // in this case I expect the packed return continuation replacement to be just the jmp_buf.
             auto m = retcon_wrapper->var();
             retcon_wrapper->set(true, w.call<longjmp>(Defs{m, v, w.lit_i32(1)}));
-        } else {
+        } else { // the return continuation carries a payload
             auto m1 = core::mem_var(retcon_wrapper);
             auto n = retcon_wrapper->num_doms();
             auto ret = w.tuple(DefVec{n -1, [&](auto j){ return retcon_wrapper->var(n, j+1);}});
+            assert(v->num_projs() == 2 && "I expect the passed return continuation value to be a tuple because it carries a payload");
             auto [jmpbuf, ptr] = v->projs<2>();
             auto m2 = w.call<mem::store>(Defs{m1, ptr, ret});
             retcon_wrapper->set(true, w.call<longjmp>(Defs{m2, jmpbuf, w.lit_i32(1)}));
