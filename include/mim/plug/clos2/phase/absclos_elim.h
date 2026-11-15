@@ -145,7 +145,7 @@ private:
 
         auto app = a->arg()->isa<App>();
 
-        if (!app) a->blame("unexpected shape under anno.closure").bail();
+        if (!app) a->blame("unexpected shape under anno.absclos").bail();
 
         auto old_proc = app->callee()->as_mut<Lam>();
         auto new_proc = rewrite_procedure(old_proc);
