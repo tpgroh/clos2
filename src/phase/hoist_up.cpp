@@ -18,7 +18,6 @@ static const Def* annotate(const Def* def, anno a) {
 // post processing of the free vars / environment
 static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
     if (fvs.size() == 0) return environment;
-    auto& w = fvs[0]->world();
 
     for (size_t i = 0; i < fvs.size(); i++) {
         auto f = fvs[i];
@@ -195,12 +194,13 @@ void HoistUp::finalize() {
                     auto f = it->var;
                     auto e = w.tuple(DefVec{it->n, [&](auto j){
                         auto e = env->proj(fvs.size(), i + j);
-                        e->set(fvs[i]->sym());
+                        e->set(fvs[i+j]->sym());
                         return e;
                     }});
                     map(f, e);
                     log().d("mapping {} to {}", f, e);
                     i += it->n -1;
+                    ++it;
                     continue;
                 }
                 auto f = fvs[i];
@@ -209,9 +209,6 @@ void HoistUp::finalize() {
                 map(f, e);
                 log().d("mapping {} to {}", f, e);
             }
-        }
-
-        for (auto e : exps) {
         }
 
         if (auto v = lam->has_var()) {
