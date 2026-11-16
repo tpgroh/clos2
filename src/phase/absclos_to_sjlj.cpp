@@ -8,6 +8,8 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
+// TODO: the jmp_buf and payload pointer should be slots (stack allocations)
+
 const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     log().d("body2setjmp {}", old_lam);
 
@@ -54,7 +56,7 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
         return_body->set(true, w.app(new_lam->ret_var(), new_m));
     else {
         auto [ret_new_m, ret_value] = w.call<mem::load>(Defs{new_m, ret_ptr})->projs<2>();
-        auto ret_actual_value = Prod::cat(true, 1, ret_value->num_projs(), ret_new_m, ret_value);
+        auto ret_actual_value = Prod::cat(true, 1, ret_value->num_projs(), w.call<mem::free>(Defs{ret_new_m, ret_ptr}), ret_value);
         return_body->set(true, w.app(new_lam->ret_var(), ret_actual_value));
     }
     
@@ -142,12 +144,12 @@ const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc) {
     // rewrite pi type of the procedure
     auto old_pi = old_proc->type()->as<Pi>();
     auto new_pi = w.mut_pi(rewrite(old_pi->type()));
+    new_pi->set_dom(new_dom);
 
     // note that the codom should not have depended on the things we just modified in the domain
     push();
     bind_old(old_pi->has_var());
-    bind_new(new_pi->var()->as<Var>());
-    new_pi->set_dom(new_dom);
+    bind_new(new_pi->var()->isa<Var>());
     if (auto v = old_pi->has_var()) map(v, new_pi->var());
     new_pi->set_codom(rewrite(old_pi->codom()));
     pop();

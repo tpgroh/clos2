@@ -134,7 +134,7 @@ private:
 
     const Def* create_closure(Axm::IsA<anno, App> a) {
         log().d("create closure {}", a);
-        
+
         auto clos_t = rewrite(a->type());
 
         if (auto it = selfclos_.find(a->arg()); it != selfclos_.end()) {
@@ -158,7 +158,12 @@ private:
     // abstract closure elim and closure application
     const Def* rewrite_imm_App(const App* app) {
         log().d("rewrite_imm_App {}", app);
-        if (auto a = Axm::isa<anno>(app)) return create_closure(a);
+        if (auto a = Axm::isa<anno>(app)) {
+            // TODO blame+bail if annotation was not absclos
+            if (!Axm::isa(anno::absclos, app))
+                app->blame("only absclos annotation should have survived").bail();
+            return create_closure(a);
+        }
 
         auto new_arg = rewrite(app->arg());
         auto new_callee = rewrite(app->callee());
@@ -231,6 +236,11 @@ private:
         log().d("rewrite_mut_Lam {} has new type {}", d, new_pi);
 
         return rewrite_stub(d, new_world().mut_lam(new_pi));
+    }
+
+    const Def* rewrite_imm_Lam(const Lam* lam) final {
+        lam->blame("immutable Lam's should not exist").bail();
+        return nullptr;
     }
 
 private:

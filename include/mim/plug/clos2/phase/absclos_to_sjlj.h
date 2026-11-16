@@ -48,7 +48,7 @@ private:
             else                              var = v->isa<Var>();
 
             if (var)
-                if (auto lam = var->binder()->as<Lam>(); lam && lam->ret_var() == v)
+                if (auto lam = Lam::isa_mut_returning(var->binder()); lam && lam->ret_var() == v)
                     allocsites_.emplace(var->binder());
         }
 
@@ -74,21 +74,12 @@ private:
         // recursive graph traversal
         for (auto d : def->deps()) analyze(d, done);
     }
-    bool analyze() final {
-        DefSet done{};
-
-        for (auto root : old_world().externals().muts())
-            analyze(root, done);
-
-        log().d("found allocsites {}", allocsites_);
-        
-        return false;
-    }
 
     void start() final {
         DefSet done{};
         for (auto root : old_world().externals().muts()) analyze(root, done);
         if (!found_captured_ret_) return;
+        log().d("found allocsites {}", allocsites_);
         RWPhase::start();
     }
 
