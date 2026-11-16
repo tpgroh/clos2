@@ -30,7 +30,12 @@ private:
     enum Pos : u8 { None = 0, Known = 1, Ret = 2, Fst = 4 };
 
     void analyze_visit(const Def* def, Pos p) {
-        if (auto f = Lam::eta_reduce(def)) return analyze_visit(f, p); // we treat eta wrap as transparent
+        log().d("analyze visit {} with pos", def, +p);
+
+        // this resulted in many lambdas not getting analyzed.
+        // I think that I actually dont need it. but we will see
+
+        // TODO if (auto f = Lam::eta_reduce(def)) return analyze_visit(f, p); // we treat eta wrap as transparent
         if (auto lam = def->isa<Lam>()) pos_[lam] = Pos(pos_[lam] | p);
         analyze(def);
     }
@@ -45,18 +50,22 @@ private:
 
         if (auto [_, ins] = analyzed_.emplace(def); !ins) return;
 
+        log().d("analyze {}", def);
+
         if (auto app = def->isa<App>()) {
             analyze_visit(app->type(), Fst);
             analyze_visit(app->callee(), Known);
             auto n = app->num_args();
             auto returning = Pi::isa_returning(app->callee_type());
-            for (size_t i = 0; i < n; i++)
+            for (size_t i = 0; i < n; i++) {
+                log().d("   rec {} {}", i, def);
                 analyze_visit(app->arg(n, i), returning && i == n-1 ? Ret : Fst);
+            }
         } else
             for (auto d : def->deps()) analyze_visit(d, Fst);
     }
 
-    bool analyze() {
+    bool analyze() final {
         for (auto r : old_world().externals().muts())
             analyze(r);
 
@@ -67,15 +76,9 @@ private:
         return false;
     }
 
-    // annotate a 'abstract' closure for later phases
-    const Def* annotate(const Def* def, anno a) {
-        auto& w = new_world();
-        return w.call(a, def);
-    }
-
     bool should_hoist(const Lam* lam) {
         if (lam->is_external()) return false; // we dont touch externals
-        if (!pos_.contains(lam)) lam->blame("this lam was not analyzed").bail();
+        if (!pos_.contains(lam)) lam->blame("this lam was not analyzed {}", lam).bail();
 
         auto p = pos_[lam];
 
@@ -115,8 +118,13 @@ private:
 
 private:
     struct Stub {
+        struct Expanded{
+            const Var* var;
+            size_t first, n;
+        };
         const Lam* lam;
-        const DefVec fvs; // I could loose this if I use a deterministic sorting of free vars. (currently it should be)
+        const DefVec fvs;
+        const fe::Vector<Expanded> expanded;
     };
     std::queue<Stub> worklist_ = {};
     DefMap<Lam*> outerlams_    = {};

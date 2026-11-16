@@ -9,12 +9,57 @@ using namespace mim;
 using namespace mim::plug;
 using namespace mim::plug::clos2;
 
+// annotate a 'abstract' closure for later phases
+static const Def* annotate(const Def* def, anno a) {
+    auto& w = def->world();
+    return w.call(a, def);
+}
+
+// post processing of the free vars / environment
+static DefVec annotate_environment (const DefVec& fvs, DefVec environment) {
+    if (fvs.size() == 0) return environment;
+
+    for (size_t i = 0; i < fvs.size(); i++) {
+        auto f = fvs[i];
+        auto nf = environment[i];
+        auto v = f->isa<Extract>() ? EXAnalysis::getVarOfExt(f->isa<Extract>()) : f->as<Var>();
+        assert(v && "The used free var analysis should only collect vars and extracts of vars");
+        auto n = v->num_projs();
+
+        // detect return continuations and annotate them as captured return continuation.
+        // note that the only captured return continuations that can be captured are already
+        // in their own slot in the environment. hoistup unpeel Var if needed to achive this.
+        if (Pi::isa_returning(v->binder()->type()) && f == v->proj(n, n-1)) {
+            environment[i] = annotate(nf, anno::captured_ret);
+        }
+    }
+
+    return environment;
+}
+
 const Def* HoistUp::hoistUp(const Lam* lam) {
     auto& w = new_world();
 
     auto fvset       = fvana_.free_vars(lam);
     auto fvs         = DefVec{fvset.begin(), fvset.end()};
-    std::ranges::sort(fvs, GIDLt<const Def*>()); // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types)
+    // this ensures that we rewrite/set ops in the correct order in the procedure type (for dependent types) TODO: this is a bad idea, it should not depend on the gid's
+    std::ranges::sort(fvs, GIDLt<const Def*>());
+
+    auto expansions = fe::Vector<Stub::Expanded>{};
+    { // unpeel variables if it has a return continuation.
+    auto expanded_fvs = DefVec{};
+    for (auto f : fvs) {
+        if (auto v = f->isa<Var>(); v && Lam::isa_mut_returning(v->binder()) && v->num_projs() > 1) {
+            auto n = v->num_projs();
+            expansions.emplace_back(v, expanded_fvs.size(), n);
+            for (size_t i = 0; i < n; i++)
+                expanded_fvs.emplace_back(v->proj(n, i));
+        } else
+            expanded_fvs.emplace_back(f);
+    }
+    fvs = std::move(expanded_fvs);
+    }
+
     auto environment = DefVec{fvs.size(), [&](auto i) { return rewrite(fvs[i]); }};
 
     log().d("hoistUp {}, free vars {} vs {}", lam, fvs, lam->free_vars());
@@ -22,8 +67,8 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we want to reuse the procedure (outerlam) if it was already created.
     // we cannot use the map/lookup machinery for this because we might have to use anoter environment in different places.
     if (auto it = outerlams_.find(lam); it != outerlams_.end()) {
-        log().d("reuse {} ~> {}", lam, it->second);
-        return annotate(w.app(it->second, environment), anno::closure);
+        if (w.tuple(environment) != it->second->var()) environment = annotate_environment(fvs, environment); // annotate only for non self recursive calls
+        return annotate(w.app(it->second, environment), anno::absclos);
     }
 
     // create pi for outer lambda
@@ -80,8 +125,8 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     auto inner_lam = w.mut_lam(inner_pi);
 
     // set dbg keys
-    inner_lam->set(lam->dbg_key());
-    outer_lam->set(lam->dbg_key());
+    inner_lam->set(lam->sym());
+    outer_lam->set(lam->sym());
     outer_lam->set(false, inner_lam); // false filter because we dont want to just insert the environment back in
 
     // set argument dbg keys
@@ -99,7 +144,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     // we perform the rewrite of the body after the map/lookup scope of the free vars was destroyed.
     // the rewrite is being done in finalize. thus we have to add {lam, fvs} to the worklist.
     // the actual new lam can be obtained there by the outerlams_ map.
-    worklist_.emplace(lam, fvs);
+    worklist_.emplace(lam, fvs, std::move(expansions));
     outerlams_[lam] = outer_lam;
 
     log().d("hoistup {} ~> {}:{} with free vars {}", lam, outer_lam, outer_lam->type(), outer_lam->free_vars());
@@ -108,7 +153,7 @@ const Def* HoistUp::hoistUp(const Lam* lam) {
     if (!outer_lam->type()->is_closed())
         outer_lam->blame("outer_lam's type is not closed, has free vars {}", outer_lam->type()->free_vars()).bail();
 
-    return annotate(w.app(outer_lam, environment), anno::closure);
+    return annotate(w.app(outer_lam, annotate_environment(fvs, environment)), anno::absclos);
 }
 
 void HoistUp::finalize() {
@@ -116,8 +161,10 @@ void HoistUp::finalize() {
         auto stub = worklist_.front();
         worklist_.pop();
 
+        auto& w = new_world();
         const auto& lam = stub.lam;
         const auto& fvs = stub.fvs;
+        const auto& exps = stub.expanded;
 
         const auto outer_lam = outerlams_.at(lam);
         const auto inner_lam = outer_lam->body()->as_mut<Lam>();
@@ -135,12 +182,27 @@ void HoistUp::finalize() {
         env->set("env");
 
         if (fvs.size() == 1) {
+            assert(exps.size() == 0);
             env->set(fvs[0]->sym());
             map(fvs[0], env);
             log().d("mapping {} to {}", fvs[0], env);
         } else {
             assert(env->num_projs() == fvs.size() && "env and fvs should agree on their arity");
+            auto it = exps.begin();
             for (size_t i = 0; i < fvs.size(); i++) {
+                if (it != exps.end() && it->first == i) {
+                    auto f = it->var;
+                    auto e = w.tuple(DefVec{it->n, [&](auto j){
+                        auto e = env->proj(fvs.size(), i + j);
+                        e->set(fvs[i+j]->sym());
+                        return e;
+                    }});
+                    map(f, e);
+                    log().d("mapping {} to {}", f, e);
+                    i += it->n -1;
+                    ++it;
+                    continue;
+                }
                 auto f = fvs[i];
                 auto e = env->proj(fvs.size(), i);
                 e->set(f->sym());
