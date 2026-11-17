@@ -18,6 +18,7 @@ extern lam _compile(): compile.Phase =
         // (I dont want to close return continuations)
         // by wrapping both I should get around that.
         compile.eta_conv,
+        compile.ret_wrap,
         
         // I will sometimes require mem.M so I make sure to have those
         compile.named "mem.add_mem",

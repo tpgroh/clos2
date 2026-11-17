@@ -26,7 +26,7 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     auto m0 = mem::mem_var(new_lam);
     assert(m0);
     assert(new_lam->ret_var() && "new_lam must have a return continuation");
-    auto ret_dom = core::strip_mem_ty(new_lam->ret_dom());
+    auto ret_dom = core::strip_mem_ty(Pi::isa_cn(new_lam->ret_var()->type())->dom());
     
     bool skip_ret_pointer = ret_dom == new_world().sigma();
 
