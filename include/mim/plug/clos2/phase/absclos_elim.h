@@ -47,12 +47,6 @@
 /// cast away
 ///   here my idea was to kep the vars free. inside the procedure's type this dependency is fine, as the type does not get thrown away there.
 ///   but in the actual closure type I want to inline the environment inside the type to which we cast the procedure
-
-
-// Notes about this rewrite phase.
-// It is designed to run directly after hoistup, there we already make sure that we only have mutable Lambdas
-// TODO FIXME how to handle immutable lambdas
-
 namespace mim::plug::clos2 {
 
 namespace Closure {

@@ -7,28 +7,6 @@
 
 namespace mim::plug::clos2 {
 
-/// This phase should do the following
-///
-/// - rewrites the body of lambdas in which we create closures by
-///   setting the new body to one that does the following:
-///   - allocate the jmp_buf and the return buffer
-///     (here we have to make sure that we exclude memory state things from the type before calling RetCont
-///     and that we use the new memory thing from setjmp in the call to return)
-///   - call setjmp and switch on the returned int (tag)
-///     - on 0 we have the rewrite of the original body
-///     - otherwise we call the return continuation with the new memory thing and the loaded value of the
-///       return buffer
-/// - rewrite the packed environment to have the jmp buffer and the return buffer instead of the
-///   return continuation
-/// - rewrite the signature of closures / to have RetCont of the return type (removed mem thing) instead of
-///   the return continuation type.
-/// - rewrite the procedure of the closure to call store + longjmp instead of the return continuation
-///
-/// trickery parts I still need to dial down later:
-/// - inside of the procedure I require a mem thing to be able to call store.
-///   I dont think that I always have that!
-/// - inside of the body where I call setjmp I must have a mem thing,
-///   this I might be able to get using mem.fresh, I have to check
 class AbsClosSjLj : public RWPhase {
 public:
     AbsClosSjLj(World& world, flags_t annex)
@@ -102,7 +80,6 @@ private:
                 cr->blame("captured return continuations should already be rewritten").bail();
 
             return it->second; // this annotation was only for this phase
-            // TODO return w.call(anno::captured_ret, it->second);
         }
 
         if (auto ano = Axm::isa(anno::absclos, app)) {

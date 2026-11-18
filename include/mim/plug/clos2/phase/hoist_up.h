@@ -26,7 +26,6 @@ private:
     // the free_vars is already droped
     void finalize() final;
 
-    // TODO: add comments, adjust placement in the code
     enum Pos : u8 { None = 0, Known = 1, Ret = 2, Fst = 4 };
 
     void analyze_visit(const Def* def, Pos p) {
@@ -39,7 +38,7 @@ private:
     }
 
     void analyze(const Def* def) {
-        // TODO: walk the entire program and store some information
+        // walk the entire program and store some information
         //   - which lambdas are return continuations.
         //   - downarg first class usage of lambdas (I think this can also be detected in rewrite_imm_App)
         // also check that all assumptions that I made are fulfilled
@@ -105,7 +104,6 @@ private:
         return new_mut;
     }
 
-    // TODO FIXME this should also be modified, I dont know how (yet)
     const Def* rewrite_imm_Lam(const Lam* lam) final {
         lam->blame("this should not be reachable").bail();
         return RWPhase::rewrite_imm_Lam(lam);

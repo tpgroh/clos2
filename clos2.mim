@@ -31,7 +31,6 @@ axm hoist_up: compile.Phase;
 /// In the target world this "closure" is then marked as such using the following wrapper which's normalizer always rejects
 /// - absclos, abstract closure
 /// - captured_ret, captured (inside environment) return continuations
-/// - nonlocal_ret, captured (inside environment) return continuations inside the procedure (making them nonlocal) TODO: this is currently not used
 priv axm anno.(absclos, captured_ret): {T:*} → T → T, normalize_anno;
 
 /// ### Phase II

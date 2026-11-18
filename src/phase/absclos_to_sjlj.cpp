@@ -62,7 +62,6 @@ const Def* AbsClosSjLj::rewrite_body2setjmp(Lam* old_lam) {
     
     // create the actual body
     map(mem::mem_var(old_lam), new_m);
-    // TODO map(old_lam->ret_var(), w.tuple(skip_ret_pointer ? Defs{jmp_buf} : Defs{jmp_buf, ret_ptr}));
     retcons_[old_lam->ret_var()] = skip_ret_pointer ? jmp_buf : w.tuple(Defs{jmp_buf, ret_ptr});
 
     auto body = w.mut_con(w.sigma());
