@@ -1,6 +1,8 @@
 # Clos2 - Closure Conversion in MimIR
 The Target of this project is to add closure conversion to the research compiler [MimIR](https://github.com/mimir/mimir).
 
+**future development of this plugin will happen on tpgroh/mimir**
+
 ## Closure Conversion
 TODO describe what Closure Conversion is.
 
