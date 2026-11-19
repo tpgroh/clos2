@@ -4,7 +4,89 @@
 ///
 /// [TOC]
 ///
-/// This plugin performs *Typed Closure Conversion*.
+/// This plugin performs *typed closure conversion* for MimIR's dependently typed IR.
+/// Every function that is used as a first-class value becomes a closed, top-level *procedure* plus an *environment* of the values it captured; the two are packed into a *closure*.
+/// Return continuations stay second class: they are never closed, and a return continuation that a closure captures is turned into a `setjmp`/`longjmp` pair instead.
+///
+/// The conversion is split into three phases that run back to back:
+///
+/// 1. @ref clos2_hoist_up "clos2.hoist_up" hoists every first-class function to the top level as an *abstract closure*, following the abstract closure conversion of [Bowman and Ahmed, PLDI'18](https://doi.org/10.1145/3192366.3192372).
+/// 2. @ref clos2_absclos_to_sjlj "clos2.absclos_to_sjlj" replaces every captured return continuation by a `jmp_buf` and a payload slot.
+/// 3. @ref clos2_absclos_elim "clos2.absclos_elim" eliminates the abstract closures in favor of a typed closure representation in the style of FCC ([Geller et al., OOPSLA'25](https://doi.org/10.1145/3720437)).
+///
+/// The C++ implementation lives in mim::plug::clos2.
+///
+/// ## Pipeline {#clos2_pipeline}
+///
+/// The conversion relies on phases of other plugins to prepare its input:
+///
+/// \snippet clos2_pipeline.mim pipeline
+///
+/// - `cps.conv` converts direct-style functions to CPS.
+/// - `compile.eta_conv` makes every lam either a pure callee or a pure first-class value.
+/// - `compile.ret_wrap` wraps every use of a return continuation that is not a call in a fresh lam.
+///   It must run **after** the last `compile.eta_conv`, which would η-reduce these wrappers back to the bare return continuation.
+/// - `mem.add_mem` threads a `mem.M` through every continuation.
+/// - The three `clos2` phases must run in this order and without other phases in between, as later ones rely on the exact shape of the annotations earlier ones produce.
+///   `clos2.absclos_to_sjlj` does nothing if no return continuation is captured.
+///
+/// @ref clos2_assumptions lists which phase relies on which of these preparations.
+///
+/// ## Assumptions {#clos2_assumptions}
+///
+/// | #  | Assumption                                                 | Established by       | `hoist_up` | `absclos_to_sjlj` | `absclos_elim` |
+/// |----|------------------------------------------------------------|----------------------|:----------:|:-----------------:|:--------------:|
+/// | 1  | The program is in CPS                                      | `cps.conv`           | ✓          | ✓                 | ✓              |
+/// | 2  | All lams are mutable                                       | (not checked before) | ✓          |                   | ✓              |
+/// | 3  | No lam is both a return continuation and first class       | `compile.eta_conv`   | ✓          |                   |                |
+/// | 4  | Return continuations are only called                       | `compile.ret_wrap`   | ✓          |                   | ✓              |
+/// | 5  | Every continuation threads memory                          | `mem.add_mem`        |            | ✓                 |                |
+/// | 6  | Captured return continuations do not outlive their frame   | not checked          |            | ✓                 |                |
+/// | 7  | No polymorphic closures (everything lives in `*`)          | not checked          | ✓          | ✓                 | ✓              |
+/// | 8  | Externals are not used as first-class values               | not checked          | ✓          |                   | ✓              |
+/// | 9  | Free variables are created in dependency order             | MimIR (GID order)    | ✓          |                   |                |
+/// | 10 | The `clos2` annotations come only from `clos2.hoist_up`    | phase order          |            | ✓                 | ✓              |
+///
+/// 1. **The program is in CPS.**
+///    Every function is a continuation (`Cn`), and a returning function takes its return continuation as its last parameter.
+///    - `hoist_up` classifies a lam as a return continuation by its position: the last argument of a call to a returning callee.
+///    - `absclos_to_sjlj` places the `setjmp` in the binder of a captured return continuation, i.e. the lam whose last parameter it is.
+///    - `absclos_elim` rejects every reachable lam that is not a `Cn` and keeps the last parameter of a returning `Cn` as a raw `Cn`.
+/// 2. **All lams are mutable.**
+///    - `hoist_up` and `absclos_elim` reject immutable lams.
+/// 3. **No lam is both a return continuation and a first-class value.**
+///    `compile.eta_conv` η-expands every lam used in more than one non-callee position, so each such use gets its own wrapper.
+///    - `hoist_up` closes first-class lams and leaves return continuations second class, so it cannot handle a lam that is both and rejects it.
+/// 4. **Return continuations are only called.**
+///    Every other use (passed on, stored, captured) goes through a wrapper lam introduced by `compile.ret_wrap`.
+///    - `hoist_up` only classifies lams, so a return continuation used as a value without a wrapper would never be closed.
+///    - `absclos_elim` turns every `Cn` outside a return position into a closure type, so a raw return continuation in such a position is ill-typed.
+///
+///    `compile.ret_wrap` creates a single wrapper per return continuation.
+///    If the same return continuation is both passed as a return continuation and used as a value, that wrapper violates assumption 3 and `hoist_up` rejects it.
+/// 5. **Every continuation threads memory.**
+///    The payload of a captured return continuation is its domain without the `mem.M`.
+///    - `absclos_to_sjlj` needs the memory of the binder of a captured return continuation to allocate the `jmp_buf` and the payload slot and to call `setjmp`.
+///    - `absclos_to_sjlj` needs the memory passed to the return continuation inside a procedure to `store` the payload and `longjmp`.
+/// 6. **A captured return continuation is only invoked while its binder's frame is live, and at most once.**
+///    - `absclos_to_sjlj` implements a captured return continuation as an escape continuation (like C's `longjmp` or Scheme's `call/ec`).
+///
+///    @warning This is not checked.
+///    A closure that captures a return continuation and is called after the binder has returned (because it was returned, stored, or the frame was left by a tail call) jumps into a dead frame.
+/// 7. **No polymorphic closures.**
+///    Closure types and environments must live in `*`, so a closure must neither take a type argument nor capture a type.
+///    The conversion is meant to run late in the pipeline, after polymorphism has been eliminated.
+///    - `hoist_up` and `absclos_to_sjlj` wrap closures in `clos2.anno`, which is declared over `{T: *}`.
+///    - `absclos_elim` hides environments behind `clos2.Env : *` with `clos2.unsafe_cast`, which is declared over `*`.
+/// 8. **Externals are not used as first-class values.**
+///    - `hoist_up` never hoists an external, so an external used as a value is not closed.
+///    - `absclos_elim` rewrites external signatures like any other: a `Cn` parameter other than the return continuation becomes a closure type, which changes the external's ABI.
+/// 9. **Free variables are created in dependency order.**
+///    - `hoist_up` builds the environment as a telescope sorted by GID, so the type of a free variable may only mention free variables with a smaller GID.
+/// 10. **The `clos2` annotations come only from `clos2.hoist_up`, and the three phases run consecutively.**
+///    - `absclos_to_sjlj` expects every `clos2.anno.absclos` to wrap a procedure applied to its environment and every `clos2.anno.captured_ret` to be a top-level slot of such an environment.
+///      `hoist_up` guarantees the latter by splitting a captured variable of a returning lam into its components.
+///    - `absclos_elim` rejects every annotation other than `clos2.anno.absclos`, so `absclos_to_sjlj` must have run before it.
 ///
 /// ## Dependencies
 ///
@@ -12,41 +94,147 @@ plugin core;
 import compile;
 import mem;
 ///
-/// ## Operations
+/// ## Phase I: Hoisting {#clos2_hoist_up}
 ///
-/// ## Phases
-
-/// ### Phase I
+/// `clos2.hoist_up` (mim::plug::clos2::HoistUp) closes every lam that is used as a first-class value and hoists it to the top level.
+/// Lams that are only called, and return continuations, stay where they are.
+///
+/// ```text
+/// con f (x: A) = e                                  // free variables y₀: B₀, …, yₙ: Bₙ
+///   ⇝
+/// f  ↦  clos2.anno.absclos (f' (y₀, …, yₙ))
+/// f' := λ (env: [y₀: B₀, …, yₙ: Bₙ])@(ff) = con (x: A[env#i/yᵢ]) = e[env#i/yᵢ]
+/// ```
+///
+/// The procedure `f'` is closed and lives at the top level.
+/// Its outer lam takes the environment and yields the original function with every free variable replaced by a projection of the environment.
+/// The application `f' env` takes the place of a closure: like the closure typing rule of CC-CC it substitutes the environment into the type of the function, which handles free variables in types.
+/// MimIR has no closure construct, so this delayed partial application is marked with `clos2.anno.absclos`.
+///
+/// Further details:
+///
+/// - The environment is a dependent telescope whenever the type of one free variable mentions another.
+/// - A free variable that is the whole variable of a returning lam is split into its components, so that a captured return continuation always has its own slot.
+/// - A captured return continuation is marked with `clos2.anno.captured_ret`.
+/// - A procedure is created once and reused at every site.
+///   A site inside the procedure that passes its own environment is reduced by MimIR to the inner lam itself.
+///
+/// ### anno
+///
+/// Annotations that mark the abstract closures for the following phases.
+/// Their normalizer never fires.
+///
+/// - `absclos`: an abstract closure, i.e. a procedure applied to its environment.
+///   Removed by `clos2.absclos_elim`.
+/// - `captured_ret`: a return continuation captured in an environment.
+///   Removed by `clos2.absclos_to_sjlj`.
+priv axm anno.(absclos, captured_ret): {T: *} → T → T, normalize_anno;
+///
+/// ### hoist_up
+///
 axm hoist_up: compile.Phase;
-/// This phase is performing something similar to the abstract closure conversion from the 2018 paper.
-/// MimIR does not provide the functionality needed to do it exactly, thus I'm simply using delayed partial application
-/// together with explicit annotation to essentially archive the same.
 ///
-/// Every Lambda that fulfils some criteria will be closure converted.
+/// ## Phase II: Captured Return Continuations {#clos2_absclos_to_sjlj}
 ///
-/// The transformation is essentially
+/// `clos2.absclos_to_sjlj` (mim::plug::clos2::AbsClosSjLj) turns every return continuation that is captured in an environment into an escape continuation.
+/// A return continuation is bound to the stack frame of its binder, so it cannot be stored as a value; instead, the binder saves its context with `setjmp`, and the closure jumps back with `longjmp`.
 ///
-/// TODO: put the transformation as tex formula here
+/// ```text
+/// binder g of a captured return continuation k: Cn [mem.M 0, T]:
+///     p        = alloc T                       // payload slot, omitted if T = []
+///     b        = alloc_jmpbuf
+///     (m, tag) = setjmp (m, b)
+///     tag == 0 → original body of g, the captured k replaced by (b, p): RetCont T
+///     tag != 0 → k (m, load p)
 ///
-/// In the target world this "closure" is then marked as such using the following wrapper which's normalizer always rejects
-/// - absclos, abstract closure
-/// - captured_ret, captured (inside environment) return continuations
-priv axm anno.(absclos, captured_ret): {T:*} → T → T, normalize_anno;
-
-/// ### Phase II
-axm absclos_to_sjlj: compile.Phase;
-/// This phase is rewriting captured return continuations to a setjump + longjump structure
-
-/// We do not know the size of jmp_buf, thus we have to keep it, pointers to it and its allocation abstract for the backend (which knows the actual size)
-/// TODO : add documentation on why/what these are (idealy after I fine tuned them to work)
+/// environment slot   Cn [mem.M 0, T]   ⇝  RetCont T
+/// call in procedure  k' (m, v)         ⇝  longjmp (store (m, p, v), b, 1)
+/// ```
+///
+/// Only the captured occurrences of `k` are replaced; ordinary returns of `g` stay ordinary returns.
+/// Inside a procedure, the slot is replaced by a wrapper with the original type `Cn [mem.M 0, T]` that stores the payload and jumps.
+/// This makes every other use of the slot work unchanged, e.g. passing it on as the return continuation of a call.
+///
+/// ### JmpBuf
+///
+/// An opaque C `jmp_buf`.
+/// Its size is only known to the backend.
 anx nom JmpBuf = [];
+///
+/// ### JmpBufPtr
+///
+/// A pointer to a JmpBuf.
 anx let JmpBufPtr = mem.Ptr0 JmpBuf;
+///
+/// ### alloc_jmpbuf
+///
+/// Allocates a fresh JmpBuf and yields a pointer to it.
 axm alloc_jmpbuf: mem.M 0 → [mem.M 0, JmpBufPtr];
+///
+/// ### RetCont
+///
+/// The first-class representation of a captured return continuation that expects a payload of type `T`: the `jmp_buf` of its binder's frame and the slot for the payload.
+/// A return continuation that only takes a `mem.M` is represented by the JmpBufPtr alone.
 anx lam RetCont (T: *): * = [JmpBufPtr, mem.Ptr0 T];
+///
+/// ### setjmp
+///
+/// Saves the current execution context in the `jmp_buf` (like C `setjmp`).
+/// Yields `0` on the initial call and the tag passed to `clos2.longjmp` when jumped to.
 axm setjmp: [mem.M 0, JmpBufPtr] → [mem.M 0, I32];
+///
+/// ### longjmp
+///
+/// Restores the context saved in the `jmp_buf` and resumes right after the corresponding `clos2.setjmp`, which then yields the given tag (like C `longjmp`).
 axm longjmp: Cn [mem.M 0, JmpBufPtr, I32];
-
-/// ### Phase III
+///
+/// ### absclos_to_sjlj
+///
+axm absclos_to_sjlj: compile.Phase;
+///
+/// ## Phase III: Closure Representation {#clos2_absclos_elim}
+///
+/// `clos2.absclos_elim` (mim::plug::clos2::AbsClosElim) replaces every abstract closure by a closure value.
+///
+/// ```text
+/// closure type   Cn A                      ⇝  rec α. [Cn [α, A'], clos2.Env]
+/// procedure      f'                        ⇝  f'': Cn (rec δ. [[Cn δ, E], A'])      // E: the concrete environment type
+/// creation       anno.absclos (f' env)     ⇝  (unsafe_cast f'', unsafe_cast env)
+/// application    c a                       ⇝  c#0 (c, a)
+/// ```
+///
+/// `A'` is `A` with every `Cn` converted to a closure type, except for the return continuation in the last position, which stays a raw `Cn`.
+/// The code of a closure takes the closure itself as its first argument, and an application always passes the closure it was projected from.
+/// A recursive call inside a procedure reuses the closure the procedure was called with instead of building a new one.
+///
+/// The type of a closure is derived from the type of the abstract closure, i.e. after the environment has been substituted into it.
+/// It may therefore mention free variables of the context the closure is used in; only the procedure itself is closed.
+///
+/// ### Env
+///
+/// The opaque type every environment is cast to, so that closures of the same function type have the same type regardless of what they captured.
 priv anx nom Env = [];
+///
+/// ### unsafe_cast
+///
+/// Reinterprets a value of type `S` as a value of type `D`.
+/// @warning This is *unchecked*: `clos2.absclos_elim` only uses it to hide the environment type behind `clos2.Env` and to cast a procedure to the code type of its closure.
 priv axm unsafe_cast: {S: *} → [D: *] → S → D;
+///
+/// ### absclos_elim
+///
 axm absclos_elim: compile.Phase;
+///
+/// ## Design Notes {#clos2_design}
+///
+/// FCC ([Geller et al., OOPSLA'25](https://doi.org/10.1145/3720437), Section 2) lists seven requirements a typed closure representation must meet to support the usual closure optimizations.
+///
+/// | #  | Requirement                                                                                  | clos2                                                                                                             |
+/// |----|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+/// | 1  | A typed closure abstraction must hide the type of the environment.                           | Met: environments are cast to `clos2.Env`.                                                                        |
+/// | 2  | A typed closure abstraction must enforce the calling convention.                             | By construction only: `absclos_elim` always passes the closure itself, but the type does not enforce it.         |
+/// | 3  | It should support the efficient flat closure representation and introduce no overhead.      | Partly: the environment is flat, but a closure is a pair of code and environment, not one record.                |
+/// | 4  | Procedures (including recursive ones) are directly callable through their code pointer.     | Open.                                                                                                             |
+/// | 5  | Procedures must have unrestricted signatures.                                               | Met: a procedure takes its concrete environment type; only the closure type hides it.                            |
+/// | 6  | The IL must satisfy subject reduction.                                                       | Not addressed by this plugin.                                                                                     |
+/// | 7  | (Mutually) recursive calls must not reallocate the closure.                                  | Partly: self-recursive calls reuse the incoming closure; mutually recursive closures are rebuilt.                |

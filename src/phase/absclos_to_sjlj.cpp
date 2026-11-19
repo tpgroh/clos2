@@ -96,8 +96,6 @@ const Def* AbsClosSjLj::rewrite_hoist_capretcon(size_t i, const Def* old_op, siz
     return w.call<RetCont>(new_rettype);
 }
 
-// TODO: I have to think about how to handle this for self recursive lambdas.
-// those dont get repackaged, I think.
 const Def* AbsClosSjLj::rewrite_hoist(Lam* old_proc) {
     if (auto new_def = lookup(old_proc)) return new_def;
 

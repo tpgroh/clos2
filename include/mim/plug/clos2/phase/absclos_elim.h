@@ -47,6 +47,7 @@
 /// cast away
 ///   here my idea was to kep the vars free. inside the procedure's type this dependency is fine, as the type does not get thrown away there.
 ///   but in the actual closure type I want to inline the environment inside the type to which we cast the procedure
+
 namespace mim::plug::clos2 {
 
 namespace Closure {
@@ -153,7 +154,6 @@ private:
     const Def* rewrite_imm_App(const App* app) {
         log().d("rewrite_imm_App {}", app);
         if (auto a = Axm::isa<anno>(app)) {
-            // TODO blame+bail if annotation was not absclos
             if (!Axm::isa(anno::absclos, app))
                 app->blame("only absclos annotation should have survived").bail();
             return create_closure(a);

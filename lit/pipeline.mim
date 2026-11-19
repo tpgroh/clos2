@@ -6,13 +6,13 @@ plugin clos2;
 plugin cps;
 plugin mem;
 
-// define a custom pipeline for optimization
+// [pipeline]
 extern lam _compile(): compile.Phase =
     compile.phases ff (
         // everything should be in CPS
         compile.named "cps.conv",
 
-        // I require that a lambda or a return continuation can only be used Known or Unknown (First class usees)
+        // I require that a lambda or a return continuation can only be used Known or Unknown (First class uses)
         // eta_conv only handles lambdas, thus we also require ret_wrap to run.
         // ret_wrap has to run after eta_conv because eta_conv would undo ret_wrap
         compile.eta_conv,
@@ -26,3 +26,4 @@ extern lam _compile(): compile.Phase =
         compile.named "clos2.absclos_to_sjlj",
         compile.named "clos2.absclos_elim",
     );
+// [pipeline]
